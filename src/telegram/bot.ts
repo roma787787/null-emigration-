@@ -3,6 +3,7 @@ import { registerAddTokenCommand } from "./commands/addToken.js";
 import { registerListCommand } from "./commands/list.js";
 import { registerRemoveTokenCommand } from "./commands/removeToken.js";
 import { registerSettingsCommand } from "./commands/settings.js";
+import { registerCallbacks } from "./callbacks.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
 import { chatSettingsRepository } from "../db/repositories/chatSettingsRepository.js";
 import type { AnalyzedMigration } from "../queue/notificationQueue.js";
@@ -17,6 +18,7 @@ export function createBot(token: string): Telegraf {
   registerListCommand(bot);
   registerRemoveTokenCommand(bot);
   registerSettingsCommand(bot);
+  registerCallbacks(bot);
 
   bot.catch((err, ctx) => {
     logger.error({ err, update: ctx.update }, "Unhandled Telegram bot error");

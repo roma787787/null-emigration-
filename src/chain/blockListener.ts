@@ -2,6 +2,7 @@ import type { Address } from "viem";
 import type { ContractCreationEvent, NetworkKey } from "../types/index.js";
 import { getPublicClient } from "./provider.js";
 import { ownerRepository } from "../db/repositories/ownerRepository.js";
+import { findFactoryCreatedContracts } from "./traceCreateDetector.js";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
@@ -12,16 +13,16 @@ export interface TrackedContractCreationEvent extends ContractCreationEvent {
 export type ContractCreationHandler = (event: TrackedContractCreationEvent) => void | Promise<void>;
 
 /**
- * Watches a single network for new blocks and reports contract-creation
- * transactions (`to === null`) originating from a tracked owner/deployer
- * address (section 4.2 of the spec).
+ * Watches a single network for new blocks and reports contract deployments
+ * originating from a tracked owner/deployer address (section 4.2 of the
+ * spec). Covers two paths:
  *
- * Note: this only catches direct EOA-initiated CREATE deployments. Contracts
- * deployed via a factory's internal CREATE/CREATE2 (where `to` is the
- * factory, not null) require trace-level inspection (e.g. debug_traceBlock /
- * trace_block) which not all RPC providers expose — that path is left as a
- * documented extension point rather than implemented against a specific
- * provider's non-standard API.
+ *  - direct EOA deployment (`tx.to === null`), via the tx receipt's
+ *    `contractAddress`;
+ *  - factory-mediated deployment (the owner calls a contract, which
+ *    internally CREATEs/CREATE2s a new contract), via
+ *    `debug_traceTransaction` when the RPC endpoint supports it — see
+ *    traceCreateDetector.ts for the capability-detection/fallback behavior.
  */
 export function startBlockListener(network: NetworkKey, onContractCreation: ContractCreationHandler): () => void {
   const client = getPublicClient(network);
@@ -56,30 +57,56 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, onContract
   const client = getPublicClient(network);
   const block = await client.getBlock({ blockNumber, includeTransactions: true });
 
-  const creationTxs = block.transactions.filter(
-    (tx): tx is typeof tx & { to: null } => typeof tx === "object" && tx.to === null,
-  );
+  const txs = block.transactions.filter((tx): tx is Exclude<typeof tx, string> => typeof tx === "object");
+  if (txs.length === 0) return;
 
-  for (const tx of creationTxs) {
-    const tokenIds = await ownerRepository.findTokenIdsByOwnerAddress(tx.from as Address);
-    if (tokenIds.length === 0) continue;
+  const uniqueSenders = [...new Set(txs.map((tx) => tx.from as Address))];
+  const ownerMap = await ownerRepository.findTokenIdsForAddresses(uniqueSenders);
+  if (ownerMap.size === 0) return;
 
-    const receipt = await client.getTransactionReceipt({ hash: tx.hash });
-    if (!receipt.contractAddress) continue;
+  for (const tx of txs) {
+    const tokenIds = ownerMap.get((tx.from as string).toLowerCase());
+    if (!tokenIds || tokenIds.length === 0) continue;
 
-    logger.info(
-      { network, contractAddress: receipt.contractAddress, creator: tx.from, tokenIds },
-      "Tracked owner deployed a new contract",
-    );
+    if (tx.to === null) {
+      const receipt = await client.getTransactionReceipt({ hash: tx.hash });
+      if (!receipt.contractAddress) continue;
 
-    await onContractCreation({
-      network,
-      contractAddress: receipt.contractAddress,
-      creatorAddress: tx.from as Address,
-      txHash: tx.hash,
-      blockNumber,
-      input: tx.input,
-      tokenIds,
-    });
+      logger.info(
+        { network, contractAddress: receipt.contractAddress, creator: tx.from, tokenIds },
+        "Tracked owner deployed a new contract",
+      );
+
+      await onContractCreation({
+        network,
+        contractAddress: receipt.contractAddress,
+        creatorAddress: tx.from as Address,
+        txHash: tx.hash,
+        blockNumber,
+        input: tx.input,
+        tokenIds,
+      });
+      continue;
+    }
+
+    if (!env.ENABLE_FACTORY_TRACE_DETECTION) continue;
+
+    const created = await findFactoryCreatedContracts(client, network, tx.hash);
+    for (const { address: contractAddress, input } of created) {
+      logger.info(
+        { network, contractAddress, creator: tx.from, via: tx.to, tokenIds },
+        "Tracked owner deployed a new contract via a factory",
+      );
+
+      await onContractCreation({
+        network,
+        contractAddress,
+        creatorAddress: tx.from as Address,
+        txHash: tx.hash,
+        blockNumber,
+        input,
+        tokenIds,
+      });
+    }
   }
 }

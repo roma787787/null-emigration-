@@ -55,21 +55,56 @@ npm run dev                # or: npm run build && npm start
 
 ```
 /add_token <network> <token_a_address>   Track a token, auto-discover its owners
-/list                                    List tracked tokens and their owners
-/remove_token <token_a_address>          Stop tracking a token
-/settings                                Show current filters
-/settings confidence all|high            Only alert on HIGH confidence
-/settings networks all|<net1,net2,...>   Only alert for specific networks
+/list                                    Paginated list of tracked tokens and their owners
+/remove_token <token_a_address>          Ask for confirmation, then stop tracking a token
+/settings                                Inline-keyboard toggles for confidence + network filters
 ```
+
+`/list` and `/settings` render inline keyboards (Prev/Next, per-network and
+per-confidence toggle buttons) rather than taking extra text arguments;
+`/remove_token` shows a Confirm/Cancel keyboard before deleting anything.
+
+## Deploying on Railway
+
+`railway.json` pins the build (`npm run build`) and start (`npm start`)
+commands so Nixpacks doesn't have to guess, and intentionally sets no
+`healthcheckPath` — this is a background bot/listener process with no HTTP
+port to probe, so Railway's HTTP healthcheck must stay off (it would
+otherwise report the deploy "unhealthy" even though it's running fine).
+
+1. New Railway project → Deploy from GitHub → this repo.
+2. Add the **PostgreSQL** and **Redis** plugins to the project; they inject
+   `DATABASE_URL` / `REDIS_URL` automatically, matching what `src/config/env.ts`
+   already reads.
+3. Set the variables from "Required configuration" above (`TELEGRAM_BOT_TOKEN`,
+   at least one `RPC_<NETWORK>`, `ENABLED_NETWORKS`) in the service's
+   Variables tab.
+4. Deploy. Migrations run automatically on boot (`runMigrations()` in
+   `src/index.ts`) — no separate migrate step needed.
+
+## Tests
+
+```bash
+npm test        # node's built-in test runner + tsx, covers pure logic:
+                 # selector scanning, confidence scoring, constructor-arg
+                 # extraction, the alert-card formatter, settings toggles
+npm run typecheck
+```
+
+Network-, Postgres- and Redis-dependent code (RPC calls, the block listener,
+repositories) isn't covered by these — they need live infrastructure to
+exercise meaningfully and are better validated against a real deployment.
 
 ## Known limitations / extension points
 
-- **Factory-deployed contracts (`CREATE2` via a factory)**: the block
-  listener currently only catches direct EOA contract creations
-  (`to == null`). Detecting internal creates from a factory call requires
-  trace-level RPC methods (`debug_traceBlock*` / `trace_block`) that aren't
-  uniformly available across free-tier providers; the listener is the place
-  to add that once you've picked a provider that supports it.
+- **Factory-deployed contracts (`CREATE2` via a factory)**: detected via
+  `debug_traceTransaction` (see `src/chain/traceCreateDetector.ts`), but only
+  on RPC endpoints that expose the `debug` namespace — not every free-tier
+  provider does. A network whose endpoint doesn't support it is
+  auto-disabled for factory detection after the first failed call (logged
+  once), while direct EOA deployments (`to == null`) keep working
+  regardless. Set `ENABLE_FACTORY_TRACE_DETECTION=false` to skip it
+  entirely.
 - **Constructor argument decoding** is heuristic (see
   `src/analyzer/constructorArgsDecoder.ts`): without the deployed contract's
   ABI/source there's no reliable way to find the exact byte offset where

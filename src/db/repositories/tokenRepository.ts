@@ -68,6 +68,14 @@ export const tokenRepository = {
     return rows[0] ? toTokenRecord(rows[0]) : null;
   },
 
+  /** All tracked entries for an address, across every network (used by /remove_token). */
+  async listByAddress(address: `0x${string}`): Promise<TokenRecord[]> {
+    const { rows } = await pool.query<TokenRow>(`SELECT * FROM tokens WHERE address = lower($1) ORDER BY network`, [
+      address,
+    ]);
+    return rows.map(toTokenRecord);
+  },
+
   async listAll(): Promise<TokenRecord[]> {
     const { rows } = await pool.query<TokenRow>(`SELECT * FROM tokens ORDER BY created_at DESC`);
     return rows.map(toTokenRecord);

@@ -1,5 +1,5 @@
 import type { Address } from "viem";
-import type { MigrationAnalysisResult, NetworkKey } from "../types/index.js";
+import type { ConfidenceLevel, MigrationAnalysisResult, NetworkKey } from "../types/index.js";
 import { getPublicClient } from "../chain/provider.js";
 import { scanBytecodeForMigrationSelectors } from "./functionSelectors.js";
 import { probeForTokenB } from "./staticCallProbe.js";
@@ -13,6 +13,12 @@ import { logger } from "../utils/logger.js";
  *    found, but not both.
  *  - LOW: neither signal present.
  */
+export function computeConfidence(hasFunctions: boolean, hasTokenB: boolean): ConfidenceLevel {
+  if (hasFunctions && hasTokenB) return "HIGH";
+  if (hasFunctions || hasTokenB) return "MEDIUM";
+  return "LOW";
+}
+
 export async function analyzeMigrationContract(
   network: NetworkKey,
   contractAddress: Address,
@@ -39,11 +45,7 @@ export async function analyzeMigrationContract(
     if (tokenBAddress) tokenBSource = "constructor_args";
   }
 
-  const hasFunctions = matchedFunctions.length > 0;
-  const hasTokenB = tokenBAddress !== null;
-
-  const confidence: MigrationAnalysisResult["confidence"] =
-    hasFunctions && hasTokenB ? "HIGH" : hasFunctions || hasTokenB ? "MEDIUM" : "LOW";
+  const confidence = computeConfidence(matchedFunctions.length > 0, tokenBAddress !== null);
 
   return {
     confidence,

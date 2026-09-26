@@ -53,6 +53,33 @@ export const ownerRepository = {
     return rows.map((r) => r.token_id);
   },
 
+  /**
+   * Batched lookup for the block listener: given every unique tx sender in a
+   * block, returns which of them are tracked owners and which token(s) each
+   * one is an owner of, in a single query instead of one per transaction.
+   */
+  async findTokenIdsForAddresses(addresses: `0x${string}`[]): Promise<Map<string, number[]>> {
+    const map = new Map<string, number[]>();
+    if (addresses.length === 0) return map;
+
+    const lowered = addresses.map((a) => a.toLowerCase());
+    const { rows } = await pool.query<{ address: string; token_id: number }>(
+      `SELECT address, token_id FROM token_owners WHERE address = ANY($1::text[])`,
+      [lowered],
+    );
+
+    for (const row of rows) {
+      const existing = map.get(row.address);
+      if (existing) {
+        existing.push(row.token_id);
+      } else {
+        map.set(row.address, [row.token_id]);
+      }
+    }
+
+    return map;
+  },
+
   async remove(tokenId: number, address: `0x${string}`): Promise<boolean> {
     const { rowCount } = await pool.query(`DELETE FROM token_owners WHERE token_id = $1 AND address = lower($2)`, [
       tokenId,

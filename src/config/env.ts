@@ -34,6 +34,7 @@ export const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "postgres://tracker:tracker@localhost:5432/migration_tracker",
   REDIS_URL: process.env.REDIS_URL ?? "redis://localhost:6379",
   BLOCK_POLL_INTERVAL_MS: Number(process.env.BLOCK_POLL_INTERVAL_MS ?? 3000),
+  ENABLE_FACTORY_TRACE_DETECTION: process.env.ENABLE_FACTORY_TRACE_DETECTION !== "false",
   LOG_LEVEL: process.env.LOG_LEVEL ?? "info",
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY ?? "",
   BSCSCAN_API_KEY: process.env.BSCSCAN_API_KEY ?? "",

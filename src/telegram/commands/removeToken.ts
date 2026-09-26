@@ -1,6 +1,7 @@
 import type { Telegraf } from "telegraf";
-import { isAddress } from "viem";
+import { getAddress, isAddress } from "viem";
 import { tokenRepository } from "../../db/repositories/tokenRepository.js";
+import { buildRemoveConfirmView } from "../views/removeTokenView.js";
 
 export function registerRemoveTokenCommand(bot: Telegraf): void {
   bot.command("remove_token", async (ctx) => {
@@ -12,12 +13,15 @@ export function registerRemoveTokenCommand(bot: Telegraf): void {
       return;
     }
 
-    const removedCount = await tokenRepository.removeByAddress(addressArg);
+    const address = getAddress(addressArg);
+    const tokens = await tokenRepository.listByAddress(address);
 
-    await ctx.reply(
-      removedCount > 0
-        ? `🗑 Removed ${addressArg} (${removedCount} network entr${removedCount === 1 ? "y" : "ies"}) from tracking.`
-        : `${addressArg} was not being tracked.`,
-    );
+    if (tokens.length === 0) {
+      await ctx.reply(`${address} was not being tracked.`);
+      return;
+    }
+
+    const { text, keyboard } = buildRemoveConfirmView(tokens, address);
+    await ctx.reply(text, keyboard);
   });
 }
