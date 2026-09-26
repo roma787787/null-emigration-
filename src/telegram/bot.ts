@@ -9,10 +9,24 @@ import { chatSettingsRepository } from "../db/repositories/chatSettingsRepositor
 import type { AnalyzedMigration } from "../queue/notificationQueue.js";
 import { logger } from "../utils/logger.js";
 
+const WELCOME_TEXT = [
+  "🛰 Multi-EVM Migration Tracker",
+  "",
+  "Watches token owners/admins across EVM networks for new contract deployments, and flags the ones that look like a migration into a new token.",
+  "",
+  "Commands:",
+  "/add_token <network> <address> — track a token, auto-discover its owners",
+  "/list — tracked tokens and their owners (paginated)",
+  "/remove_token <address> — stop tracking a token (asks to confirm)",
+  "/settings — toggle which confidence level / networks alert this chat",
+  "/help — show this message again",
+].join("\n");
+
 export function createBot(token: string): Telegraf {
   const bot = new Telegraf(token);
 
-  bot.start((ctx) => ctx.reply("Multi-EVM migration tracker online. Use /add_token <network> <address> to begin."));
+  bot.start((ctx) => ctx.reply(WELCOME_TEXT));
+  bot.help((ctx) => ctx.reply(WELCOME_TEXT));
 
   registerAddTokenCommand(bot);
   registerListCommand(bot);
