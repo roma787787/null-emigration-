@@ -46,18 +46,20 @@ npm run dev                # or: npm run build && npm start
   list of RPC URLs; the first is primary, the rest are automatic failover
   endpoints (Alchemy / QuickNode / Ankr, etc). Public fallback RPCs are used
   if unset, but they are rate-limited and unsuitable for production.
-- `ETHERSCAN_API_KEY` / `BSCSCAN_API_KEY` / `ARBISCAN_API_KEY` — optional,
-  enables "Contract Creator" (deployer) lookups on those networks via the
-  explorer API. Without a key, owner discovery still works for tokens that
-  expose `owner()`/`admin()`/`DEFAULT_ADMIN_ROLE` on-chain.
+- `ETHERSCAN_API_KEY` — optional, enables "Contract Creator" (deployer)
+  lookups via Etherscan's unified multichain API (one key covers every
+  supported network). Without it, owner discovery still works for tokens
+  that expose `owner()`/`admin()`/`DEFAULT_ADMIN_ROLE` on-chain.
 
 ## Bot commands
 
 ```
-/add_token <network> <token_a_address>   Track a token, auto-discover its owners
-/list                                    Paginated list of tracked tokens and their owners
-/remove_token <token_a_address>          Ask for confirmation, then stop tracking a token
-/settings                                Inline-keyboard toggles for confidence + network filters
+/add_token <network> <token_a_address>            Track a token, auto-discover its owners
+/list                                             Paginated list of tracked tokens and their owners
+/remove_token <token_a_address>                   Ask for confirmation, then stop tracking a token
+/add_owner <network> <token> <owner_address>       Manually link an extra wallet (dev, multisig) to a tracked token
+/remove_owner <network> <token> <owner_address>    Unlink a manually-added wallet
+/settings                                         Inline-keyboard toggles for confidence + network filters
 ```
 
 `/list` and `/settings` render inline keyboards (Prev/Next, per-network and
@@ -110,7 +112,6 @@ exercise meaningfully and are better validated against a real deployment.
   ABI/source there's no reliable way to find the exact byte offset where
   constructor args start, so it scans trailing 32-byte words for
   address-shaped values and verifies each against ERC-20 getters.
-- **Deployer lookup** depends on an Etherscan-family explorer API key per
-  network; add more networks to `explorerApis` in
-  `src/chain/ownerDiscovery.ts` as needed (or switch to a unified
-  multi-chain explorer API).
+- **Deployer lookup** uses Etherscan's unified multichain API (`chainid`
+  param), so `ETHERSCAN_API_KEY` alone covers every supported network — no
+  per-network key needed.

@@ -1,19 +1,11 @@
 import { getAddress, isAddressEqual, zeroAddress, type Address } from "viem";
 import type { NetworkKey, OwnerSource } from "../types/index.js";
 import { getPublicClient } from "./provider.js";
+import { networks } from "../config/networks.js";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
-interface ExplorerApiConfig {
-  apiBaseUrl: string;
-  apiKey: string;
-}
-
-const explorerApis: Partial<Record<NetworkKey, ExplorerApiConfig>> = {
-  ethereum: { apiBaseUrl: "https://api.etherscan.io/api", apiKey: env.ETHERSCAN_API_KEY },
-  bsc: { apiBaseUrl: "https://api.bscscan.com/api", apiKey: env.BSCSCAN_API_KEY },
-  arbitrum: { apiBaseUrl: "https://api.arbiscan.io/api", apiKey: env.ARBISCAN_API_KEY },
-};
+const ETHERSCAN_V2_API_URL = "https://api.etherscan.io/v2/api";
 
 export interface DiscoveredOwner {
   address: Address;
@@ -22,25 +14,27 @@ export interface DiscoveredOwner {
 
 /**
  * Looks up the "Contract Creator" / tx.from of the token's deployment
- * transaction via the block explorer API (mirrors the Etherscan
- * "Contract Creator" field shown on a token's page).
+ * transaction via Etherscan's unified multichain API (one API key, `chainid`
+ * selects the network — covers every network in networks.ts, not just
+ * Ethereum). Mirrors the "Contract Creator" field shown on a token's
+ * Etherscan-family explorer page.
  *
- * Requires an explorer API key for the network (see .env.example). Falls
- * back to null when no explorer integration is configured — callers should
- * still get owner()/admin() results from getOnChainOwners().
+ * Requires `ETHERSCAN_API_KEY` (see .env.example). Falls back to null when
+ * unset — callers should still get owner()/admin() results from
+ * getOnChainOwners().
  */
 export async function getContractDeployer(network: NetworkKey, tokenAddress: Address): Promise<Address | null> {
-  const config = explorerApis[network];
-  if (!config || !config.apiKey) {
-    logger.warn({ network }, "No explorer API key configured, skipping deployer lookup");
+  if (!env.ETHERSCAN_API_KEY) {
+    logger.warn({ network }, "ETHERSCAN_API_KEY not configured, skipping deployer lookup");
     return null;
   }
 
-  const url = new URL(config.apiBaseUrl);
+  const url = new URL(ETHERSCAN_V2_API_URL);
+  url.searchParams.set("chainid", String(networks[network].chain.id));
   url.searchParams.set("module", "contract");
   url.searchParams.set("action", "getcontractcreation");
   url.searchParams.set("contractaddresses", tokenAddress);
-  url.searchParams.set("apikey", config.apiKey);
+  url.searchParams.set("apikey", env.ETHERSCAN_API_KEY);
 
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (!response.ok) {

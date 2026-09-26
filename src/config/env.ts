@@ -36,9 +36,9 @@ export const env = {
   BLOCK_POLL_INTERVAL_MS: Number(process.env.BLOCK_POLL_INTERVAL_MS ?? 3000),
   ENABLE_FACTORY_TRACE_DETECTION: process.env.ENABLE_FACTORY_TRACE_DETECTION !== "false",
   LOG_LEVEL: process.env.LOG_LEVEL ?? "info",
+  // Etherscan's unified multichain API (v2) — one key, `chainid` selects the
+  // network. Covers deployer lookups on every network in networks.ts.
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY ?? "",
-  BSCSCAN_API_KEY: process.env.BSCSCAN_API_KEY ?? "",
-  ARBISCAN_API_KEY: process.env.ARBISCAN_API_KEY ?? "",
 
   rpcUrlsFor(network: NetworkKey): string[] {
     const envKey = `RPC_${network.toUpperCase().replace(/-/g, "_")}`;

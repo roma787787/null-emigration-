@@ -2,6 +2,8 @@ import { Telegraf } from "telegraf";
 import { registerAddTokenCommand } from "./commands/addToken.js";
 import { registerListCommand } from "./commands/list.js";
 import { registerRemoveTokenCommand } from "./commands/removeToken.js";
+import { registerAddOwnerCommand } from "./commands/addOwner.js";
+import { registerRemoveOwnerCommand } from "./commands/removeOwner.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerCallbacks } from "./callbacks.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
@@ -18,6 +20,8 @@ const WELCOME_TEXT = [
   "/add_token <network> <address> — track a token, auto-discover its owners",
   "/list — tracked tokens and their owners (paginated)",
   "/remove_token <address> — stop tracking a token (asks to confirm)",
+  "/add_owner <network> <token> <owner> — manually link an extra wallet (dev, multisig) to a tracked token",
+  "/remove_owner <network> <token> <owner> — unlink a manually-added wallet",
   "/settings — toggle which confidence level / networks alert this chat",
   "/help — show this message again",
 ].join("\n");
@@ -31,6 +35,8 @@ export function createBot(token: string): Telegraf {
   registerAddTokenCommand(bot);
   registerListCommand(bot);
   registerRemoveTokenCommand(bot);
+  registerAddOwnerCommand(bot);
+  registerRemoveOwnerCommand(bot);
   registerSettingsCommand(bot);
   registerCallbacks(bot);
 
