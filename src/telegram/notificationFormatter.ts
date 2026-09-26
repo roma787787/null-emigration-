@@ -1,5 +1,6 @@
-import type { MigrationContractRecord, TokenRecord } from "../types/index.js";
+import type { Language, MigrationContractRecord, TokenRecord } from "../types/index.js";
 import { networks } from "../config/networks.js";
+import { t } from "./i18n/index.js";
 
 function shorten(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -9,36 +10,37 @@ function escapeMd(text: string): string {
   return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, "\\$1");
 }
 
-function tokenBSourceLabel(migration: MigrationContractRecord): string {
+function tokenBSourceLabel(lang: Language, migration: MigrationContractRecord): string {
   switch (migration.tokenBSource) {
     case "static_call":
-      return migration.matchedGetter ? `переменной ${migration.matchedGetter}` : "переменной";
+      return t(lang, "card.sourceStaticCall", { getter: migration.matchedGetter ?? "" });
     case "constructor_args":
-      return "конструкторе";
+      return t(lang, "card.sourceConstructor");
     case "token_a_match":
-      return "конструкторе — совпадает с Token A";
+      return t(lang, "card.sourceTokenAMatch");
     default:
       return "";
   }
 }
 
-function foundSignals(migration: MigrationContractRecord): string[] {
+function foundSignals(lang: Language, migration: MigrationContractRecord): string[] {
   const signals: string[] = [];
 
-  for (const fn of migration.matchedFunctions) signals.push(`Функция ${fn}`);
-  for (const ev of migration.matchedEvents) signals.push(`Событие ${ev}`);
+  for (const fn of migration.matchedFunctions) signals.push(`${t(lang, "card.functionWord")} ${fn}`);
+  for (const ev of migration.matchedEvents) signals.push(`${t(lang, "card.eventWord")} ${ev}`);
   if (migration.tokenBSource === "static_call" && migration.matchedGetter) {
-    signals.push(`переменная ${migration.matchedGetter}`);
+    signals.push(`${t(lang, "card.variableWord")} ${migration.matchedGetter}`);
   }
-  for (const aux of migration.matchedAuxiliary) signals.push(`переменная ${aux}`);
+  for (const aux of migration.matchedAuxiliary) signals.push(`${t(lang, "card.variableWord")} ${aux}`);
 
   return signals;
 }
 
 /**
- * Renders the alert card described in spec section 4.4, using MarkdownV2.
+ * Renders the alert card described in spec section 4.4, using MarkdownV2, in
+ * the receiving chat's chosen language.
  */
-export function formatMigrationAlert(token: TokenRecord, migration: MigrationContractRecord): string {
+export function formatMigrationAlert(token: TokenRecord, migration: MigrationContractRecord, lang: Language): string {
   const network = networks[token.network];
   const symbol = token.symbol ? escapeMd(token.symbol) : "UNKNOWN";
   const tokenA = `${symbol} \\(${escapeMd(shorten(token.address))}\\)`;
@@ -46,11 +48,11 @@ export function formatMigrationAlert(token: TokenRecord, migration: MigrationCon
   const contract = escapeMd(migration.contractAddress);
 
   const tokenBLine = migration.tokenBAddress
-    ? `${escapeMd(migration.tokenBAddress)} \\[Найден в ${escapeMd(tokenBSourceLabel(migration))}\\]`
-    : "_ещё не задан_";
+    ? `${escapeMd(migration.tokenBAddress)} \\[${escapeMd(t(lang, "card.foundIn"))} ${escapeMd(tokenBSourceLabel(lang, migration))}\\]`
+    : `_${escapeMd(t(lang, "card.notSetYet"))}_`;
 
-  const signals = foundSignals(migration);
-  const signalsLine = signals.length > 0 ? signals.map(escapeMd).join(", ") : "_явных признаков не найдено_";
+  const signals = foundSignals(lang, migration);
+  const signalsLine = signals.length > 0 ? signals.map(escapeMd).join(", ") : `_${escapeMd(t(lang, "card.noSignals"))}_`;
 
   const links = [
     `[Block Explorer Contract](${network.explorerAddressUrl(migration.contractAddress)})`,
@@ -63,22 +65,22 @@ export function formatMigrationAlert(token: TokenRecord, migration: MigrationCon
   const confidenceEmoji = migration.confidence === "HIGH" ? "🟢" : migration.confidence === "MEDIUM" ? "🟡" : "⚪️";
 
   return [
-    "🚨 *ОБНАРУЖЕН КОНТРАКТ МИГРАЦИИ* 🚨",
+    `🚨 *${escapeMd(t(lang, "card.title"))}* 🚨`,
     "",
-    `📍 Сеть: ${escapeMd(network.label)}`,
-    `🪙 Токен A: ${tokenA}`,
-    `👤 Создатель: ${creator} \\(Deployer / Owner\\)`,
+    `📍 ${escapeMd(t(lang, "card.network"))}: ${escapeMd(network.label)}`,
+    `🪙 ${escapeMd(t(lang, "card.tokenA"))}: ${tokenA}`,
+    `👤 ${escapeMd(t(lang, "card.creator"))}: ${creator} \\(${escapeMd(t(lang, "card.deployerOwner"))}\\)`,
     "",
-    "📄 Новый контракт миграции:",
+    `📄 ${escapeMd(t(lang, "card.newContract"))}`,
     contract,
     "",
-    "🎯 Целевой токен \\(Token B\\):",
+    `🎯 ${escapeMd(t(lang, "card.targetToken"))}`,
     tokenBLine,
     "",
-    `📊 Статус анализа: ${confidenceEmoji} *${migration.confidence} CONFIDENCE* \\(${migration.confidenceScore}%\\)`,
-    `⚡️ Найдено: ${signalsLine}`,
+    `📊 ${escapeMd(t(lang, "card.analysisStatus"))}: ${confidenceEmoji} *${migration.confidence} ${escapeMd(t(lang, "card.confidenceWord"))}* \\(${migration.confidenceScore}%\\)`,
+    `⚡️ ${escapeMd(t(lang, "card.foundSignals"))}: ${signalsLine}`,
     "",
-    "🔗 Ссылки:",
+    `🔗 ${escapeMd(t(lang, "card.links"))}`,
     links.join(" \\| "),
   ].join("\n");
 }

@@ -51,6 +51,15 @@ export const env = {
     if (configured.length === 0) return allNetworkKeys;
     return configured.filter((k): k is NetworkKey => allNetworkKeys.includes(k as NetworkKey));
   },
+
+  /**
+   * Telegram chat/user IDs (as strings) that are administrators: they're
+   * auto-approved on first contact and receive Approve/Reject requests for
+   * every other chat that starts the bot.
+   */
+  adminChatIds(): string[] {
+    return parseList(process.env.ADMIN_CHAT_IDS);
+  },
 };
 
 export function assertTelegramConfigured(): string {

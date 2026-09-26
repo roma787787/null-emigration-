@@ -19,7 +19,9 @@ Implements the architecture from the project spec:
    auxiliary signals (`oldToken()`, `rate()`), and assigns a HIGH / MEDIUM /
    LOW confidence label with a supplementary 0–100% score.
 4. **Telegram bot** — `/add_token`, `/list`, `/remove_token`, `/add_owner`,
-   `/remove_owner`, `/settings`, and the alert card itself.
+   `/remove_owner`, `/settings`, and the alert card itself. Every chat picks
+   a language (English/Ukrainian/Russian) on first contact and needs
+   administrator approval before any command works.
 
 ## Stack
 
@@ -58,6 +60,28 @@ npm run dev                # or: npm run build && npm start
   lookups via Etherscan's unified multichain API (one key covers every
   supported network). Without it, owner discovery still works for tokens
   that expose `owner()`/`admin()`/`DEFAULT_ADMIN_ROLE` on-chain.
+- `ADMIN_CHAT_IDS` — comma-separated Telegram numeric chat/user IDs (not
+  `@usernames`) that are administrators. Required for anyone other than the
+  admins themselves to ever use the bot — see "Access control" below.
+
+## Access control & languages
+
+Every chat that messages the bot for the first time is walked through:
+
+1. **Language picker** — English / Українська / Русский, shown as inline
+   buttons. Change it later any time with `/language`.
+2. **Approval gate** — unless the chat's ID is listed in `ADMIN_CHAT_IDS`, no
+   command does anything until an administrator approves it. Each admin
+   chat gets a one-time "🆕 New access request" message with Approve/Reject
+   buttons (in *their* chosen language) the first time a chat finishes
+   picking a language; approving/rejecting notifies the requester. An admin
+   chat must have sent `/start` to the bot at least once for it to be able
+   to message them (Telegram requires the bot to have prior contact).
+
+All bot text — commands, errors, the settings UI, and the alert card itself
+— is localized per chat from `src/telegram/i18n/translations.ts`; add a
+fourth language there (and to the `Language` type in `src/types/index.ts`)
+if you need one.
 
 ## Bot commands
 
@@ -68,6 +92,7 @@ npm run dev                # or: npm run build && npm start
 /add_owner <network> <token> <owner_address>       Manually link an extra wallet (dev, multisig) to a tracked token
 /remove_owner <network> <token> <owner_address>    Unlink a manually-added wallet
 /settings                                         Inline-keyboard toggles for confidence + network filters
+/language                                         Change the bot's language
 ```
 
 `/list` and `/settings` render inline keyboards (Prev/Next, per-network and
@@ -97,7 +122,8 @@ otherwise report the deploy "unhealthy" even though it's running fine).
 ```bash
 npm test        # node's built-in test runner + tsx, covers pure logic:
                  # selector scanning, confidence scoring, constructor-arg
-                 # extraction, the alert-card formatter, settings toggles
+                 # extraction, the alert-card formatter, settings toggles,
+                 # and that all three languages have matching translation keys
 npm run typecheck
 ```
 

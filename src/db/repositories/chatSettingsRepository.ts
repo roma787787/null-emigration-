@@ -1,10 +1,13 @@
 import { pool } from "../client.js";
-import type { ChatSettingsRecord, ConfidenceFilter, NetworkKey } from "../../types/index.js";
+import type { ChatSettingsRecord, ConfidenceFilter, Language, NetworkKey } from "../../types/index.js";
 
 interface ChatSettingsRow {
   chat_id: string;
   confidence_filter: string;
   networks_filter: string[] | null;
+  language: string | null;
+  approved: boolean;
+  access_requested: boolean;
   created_at: Date;
 }
 
@@ -13,6 +16,9 @@ function toRecord(row: ChatSettingsRow): ChatSettingsRecord {
     chatId: row.chat_id,
     confidenceFilter: row.confidence_filter as ConfidenceFilter,
     networksFilter: (row.networks_filter as NetworkKey[] | null) ?? null,
+    language: row.language as Language | null,
+    approved: row.approved,
+    accessRequested: row.access_requested,
     createdAt: row.created_at,
   };
 }
@@ -48,6 +54,30 @@ export const chatSettingsRepository = {
       `INSERT INTO chat_settings (chat_id, networks_filter) VALUES ($1, $2)
        ON CONFLICT (chat_id) DO UPDATE SET networks_filter = EXCLUDED.networks_filter`,
       [chatId, networks],
+    );
+  },
+
+  async setLanguage(chatId: string, language: Language): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_settings (chat_id, language) VALUES ($1, $2)
+       ON CONFLICT (chat_id) DO UPDATE SET language = EXCLUDED.language`,
+      [chatId, language],
+    );
+  },
+
+  async setApproved(chatId: string, approved: boolean): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_settings (chat_id, approved) VALUES ($1, $2)
+       ON CONFLICT (chat_id) DO UPDATE SET approved = EXCLUDED.approved`,
+      [chatId, approved],
+    );
+  },
+
+  async setAccessRequested(chatId: string, accessRequested: boolean): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_settings (chat_id, access_requested) VALUES ($1, $2)
+       ON CONFLICT (chat_id) DO UPDATE SET access_requested = EXCLUDED.access_requested`,
+      [chatId, accessRequested],
     );
   },
 

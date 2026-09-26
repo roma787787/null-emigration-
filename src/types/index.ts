@@ -18,6 +18,8 @@ export type ConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
 
 export type ConfidenceFilter = "ALL" | "HIGH_ONLY";
 
+export type Language = "en" | "uk" | "ru";
+
 export interface TokenRecord {
   id: number;
   network: NetworkKey;
@@ -59,6 +61,10 @@ export interface ChatSettingsRecord {
   chatId: string;
   confidenceFilter: ConfidenceFilter;
   networksFilter: NetworkKey[] | null;
+  /** null = the chat hasn't picked a language yet (shows the picker). */
+  language: Language | null;
+  approved: boolean;
+  accessRequested: boolean;
   createdAt: Date;
 }
 

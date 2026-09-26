@@ -1,10 +1,15 @@
 import { Markup } from "telegraf";
 import { tokenRepository } from "../../db/repositories/tokenRepository.js";
 import { ownerRepository } from "../../db/repositories/ownerRepository.js";
+import type { Language } from "../../types/index.js";
+import { t } from "../i18n/index.js";
 
 const PAGE_SIZE = 5;
 
-export async function renderListPage(page: number): Promise<{
+export async function renderListPage(
+  page: number,
+  lang: Language,
+): Promise<{
   text: string;
   keyboard: ReturnType<typeof Markup.inlineKeyboard>;
 }> {
@@ -12,7 +17,7 @@ export async function renderListPage(page: number): Promise<{
 
   if (tokens.length === 0) {
     return {
-      text: "No tokens are being tracked yet. Add one with /add_token <network> <address>.",
+      text: t(lang, "list.empty"),
       keyboard: Markup.inlineKeyboard([]),
     };
   }
@@ -24,18 +29,20 @@ export async function renderListPage(page: number): Promise<{
   const blocks = await Promise.all(
     pageTokens.map(async (token) => {
       const owners = await ownerRepository.listForToken(token.id);
-      const ownerLines = owners.length > 0 ? owners.map((o) => `    • ${o.address} (${o.source})`).join("\n") : "    • none found";
-      return [`🪙 ${token.symbol ?? "?"} — ${token.network} — ${token.address}`, "  Owners/admins:", ownerLines].join(
+      const ownerLines =
+        owners.length > 0 ? owners.map((o) => `    • ${o.address} (${o.source})`).join("\n") : t(lang, "list.ownersNone");
+      return [`🪙 ${token.symbol ?? "?"} — ${token.network} — ${token.address}`, t(lang, "list.ownersLabel"), ownerLines].join(
         "\n",
       );
     }),
   );
 
-  const text = [`Tracked tokens (page ${safePage + 1}/${pageCount}):`, "", blocks.join("\n\n")].join("\n");
+  const text = [t(lang, "list.header", { page: safePage + 1, pageCount }), "", blocks.join("\n\n")].join("\n");
 
   const navRow = [];
-  if (safePage > 0) navRow.push(Markup.button.callback("◀️ Prev", `list:page:${safePage - 1}`));
-  if (safePage < pageCount - 1) navRow.push(Markup.button.callback("Next ▶️", `list:page:${safePage + 1}`));
+  if (safePage > 0) navRow.push(Markup.button.callback(t(lang, "list.prevButton"), `list:page:${safePage - 1}`));
+  if (safePage < pageCount - 1)
+    navRow.push(Markup.button.callback(t(lang, "list.nextButton"), `list:page:${safePage + 1}`));
 
   return { text, keyboard: Markup.inlineKeyboard(navRow.length > 0 ? [navRow] : []) };
 }

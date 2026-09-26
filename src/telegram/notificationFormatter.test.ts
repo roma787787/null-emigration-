@@ -36,7 +36,7 @@ function migration(overrides: Partial<MigrationContractRecord> = {}): MigrationC
 }
 
 test("includes the network label, confidence, and matched function", () => {
-  const text = formatMigrationAlert(token, migration());
+  const text = formatMigrationAlert(token, migration(), "en");
 
   assert.match(text, /Arbitrum One/);
   assert.match(text, /HIGH CONFIDENCE/);
@@ -44,7 +44,7 @@ test("includes the network label, confidence, and matched function", () => {
 });
 
 test("includes explorer and DexScreener links when Token B is known", () => {
-  const text = formatMigrationAlert(token, migration());
+  const text = formatMigrationAlert(token, migration(), "en");
 
   assert.match(text, /arbiscan\.io\/address/);
   assert.match(text, /dexscreener\.com\/arbitrum/);
@@ -54,28 +54,36 @@ test("omits the DexScreener link and shows a placeholder when Token B is unknown
   const text = formatMigrationAlert(
     token,
     migration({ tokenBAddress: null, tokenBSource: null, matchedGetter: null, confidence: "MEDIUM" }),
+    "en",
   );
 
   assert.doesNotMatch(text, /dexscreener\.com/);
   assert.match(text, /MEDIUM CONFIDENCE/);
 });
 
-test("includes the confidence percentage and names the matched getter", () => {
-  const text = formatMigrationAlert(token, migration());
+test("includes the confidence percentage and names the matched getter (ru)", () => {
+  const text = formatMigrationAlert(token, migration(), "ru");
 
   assert.match(text, /90%/);
   assert.ok(text.includes("переменная newToken"));
 });
 
-test("names the constructor-args source when Token B came from there", () => {
-  const text = formatMigrationAlert(token, migration({ tokenBSource: "constructor_args", matchedGetter: null }));
+test("names the constructor-args source when Token B came from there (ru)", () => {
+  const text = formatMigrationAlert(token, migration({ tokenBSource: "constructor_args", matchedGetter: null }), "ru");
 
   assert.ok(text.includes("конструкторе"));
 });
 
+test("renders the card in Ukrainian when the chat's language is uk", () => {
+  const text = formatMigrationAlert(token, migration(), "uk");
+
+  assert.match(text, /ВИЯВЛЕНО КОНТРАКТ МІГРАЦІЇ/);
+  assert.match(text, /Мережа/);
+});
+
 test("escapes MarkdownV2 special characters in the token symbol", () => {
   const dottedToken: TokenRecord = { ...token, symbol: "A.B_C" };
-  const text = formatMigrationAlert(dottedToken, migration());
+  const text = formatMigrationAlert(dottedToken, migration(), "en");
 
   assert.match(text, /A\\\.B\\_C/);
 });

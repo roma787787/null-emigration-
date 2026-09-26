@@ -1,7 +1,8 @@
 import { Markup } from "telegraf";
 import { allNetworkKeys } from "../../config/networks.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
-import type { ChatSettingsRecord, NetworkKey } from "../../types/index.js";
+import type { ChatSettingsRecord, Language, NetworkKey } from "../../types/index.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 const NETWORK_BUTTONS_PER_ROW = 3;
 
@@ -9,20 +10,28 @@ function checkmark(active: boolean): string {
   return active ? " ✅" : "";
 }
 
-export function buildSettingsText(settings: ChatSettingsRecord): string {
+export function buildSettingsText(settings: ChatSettingsRecord, lang: Language): string {
   return [
-    "⚙️ Settings",
+    t(lang, "settings.title"),
     "",
-    `Confidence filter: ${settings.confidenceFilter}`,
-    `Networks: ${settings.networksFilter ? settings.networksFilter.join(", ") : "all"}`,
+    t(lang, "settings.confidenceLabel", { filter: settings.confidenceFilter }),
+    t(lang, "settings.networksLabel", {
+      networks: settings.networksFilter ? settings.networksFilter.join(", ") : t(lang, "settings.networksAll"),
+    }),
   ].join("\n");
 }
 
-export function buildSettingsKeyboard(settings: ChatSettingsRecord): ReturnType<typeof Markup.inlineKeyboard> {
+export function buildSettingsKeyboard(
+  settings: ChatSettingsRecord,
+  lang: Language,
+): ReturnType<typeof Markup.inlineKeyboard> {
   const confidenceRow = [
-    Markup.button.callback(`All confidence${checkmark(settings.confidenceFilter === "ALL")}`, "settings:confidence:ALL"),
     Markup.button.callback(
-      `HIGH only${checkmark(settings.confidenceFilter === "HIGH_ONLY")}`,
+      `${t(lang, "settings.buttonAllConfidence")}${checkmark(settings.confidenceFilter === "ALL")}`,
+      "settings:confidence:ALL",
+    ),
+    Markup.button.callback(
+      `${t(lang, "settings.buttonHighOnly")}${checkmark(settings.confidenceFilter === "HIGH_ONLY")}`,
       "settings:confidence:HIGH_ONLY",
     ),
   ];
@@ -42,7 +51,10 @@ export function buildSettingsKeyboard(settings: ChatSettingsRecord): ReturnType<
   }
 
   const allNetworksRow = [
-    Markup.button.callback(`All networks${checkmark(settings.networksFilter === null)}`, "settings:net:ALL"),
+    Markup.button.callback(
+      `${t(lang, "settings.buttonAllNetworks")}${checkmark(settings.networksFilter === null)}`,
+      "settings:net:ALL",
+    ),
   ];
 
   return Markup.inlineKeyboard([confidenceRow, ...networkRows, allNetworksRow]);
@@ -77,5 +89,6 @@ export async function renderSettings(chatId: string): Promise<{
   keyboard: ReturnType<typeof Markup.inlineKeyboard>;
 }> {
   const settings = await chatSettingsRepository.ensure(chatId);
-  return { text: buildSettingsText(settings), keyboard: buildSettingsKeyboard(settings) };
+  const lang = settings.language ?? DEFAULT_LANGUAGE;
+  return { text: buildSettingsText(settings, lang), keyboard: buildSettingsKeyboard(settings, lang) };
 }

@@ -6,6 +6,7 @@ import { discoverAllOwners } from "../../chain/ownerDiscovery.js";
 import { tokenRepository } from "../../db/repositories/tokenRepository.js";
 import { ownerRepository } from "../../db/repositories/ownerRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
+import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 
 const NAME_SYMBOL_ABI = [
@@ -15,33 +16,33 @@ const NAME_SYMBOL_ABI = [
 
 export function registerAddTokenCommand(bot: Telegraf): void {
   bot.command("add_token", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const settings = await chatSettingsRepository.ensure(chatId);
+    const lang = settings.language ?? DEFAULT_LANGUAGE;
+    const networksList = allNetworkKeys().join(", ");
+
     const args = ctx.message.text.trim().split(/\s+/).slice(1);
     const [networkArg, addressArg] = args;
 
     if (!networkArg || !addressArg) {
-      await ctx.reply(
-        `Usage: /add_token <network> <token_a_address>\nSupported networks: ${allNetworkKeys().join(", ")}`,
-      );
+      await ctx.reply(t(lang, "addToken.usage", { networks: networksList }));
       return;
     }
 
     const network = networkArg.toLowerCase();
     if (!isKnownNetwork(network)) {
-      await ctx.reply(`Unknown network "${networkArg}". Supported: ${allNetworkKeys().join(", ")}`);
+      await ctx.reply(t(lang, "addToken.unknownNetwork", { network: networkArg, networks: networksList }));
       return;
     }
 
     if (!isAddress(addressArg)) {
-      await ctx.reply(`"${addressArg}" is not a valid EVM address.`);
+      await ctx.reply(t(lang, "addToken.invalidAddress", { address: addressArg }));
       return;
     }
 
     const address = getAddress(addressArg);
-    const chatId = String(ctx.chat.id);
 
-    await chatSettingsRepository.ensure(chatId);
-
-    await ctx.reply(`Looking up ${address} on ${network}...`);
+    await ctx.reply(t(lang, "addToken.lookingUp", { address, network }));
 
     let name: string | null = null;
     let symbol: string | null = null;
@@ -70,15 +71,15 @@ export function registerAddTokenCommand(bot: Telegraf): void {
     const ownerLines =
       owners.length > 0
         ? owners.map((o) => `  • ${o.address} (${o.source})`).join("\n")
-        : "  • None found automatically — you can link wallets manually later.";
+        : t(lang, "addToken.ownersNone");
 
     await ctx.reply(
-      [
-        `✅ Now tracking ${symbol ?? "token"} (${address}) on ${network}.`,
-        "",
-        "Discovered owners/admins:",
-        ownerLines,
-      ].join("\n"),
+      t(lang, "addToken.success", {
+        symbol: symbol ?? t(lang, "addToken.defaultSymbol"),
+        address,
+        network,
+        owners: ownerLines,
+      }),
     );
   });
 }

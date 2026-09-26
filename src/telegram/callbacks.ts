@@ -5,6 +5,7 @@ import { chatSettingsRepository } from "../db/repositories/chatSettingsRepositor
 import { tokenRepository } from "../db/repositories/tokenRepository.js";
 import { renderSettings, toggleNetworkFilter } from "./views/settingsView.js";
 import { renderListPage } from "./views/listView.js";
+import { t, DEFAULT_LANGUAGE } from "./i18n/index.js";
 
 export function registerCallbacks(bot: Telegraf): void {
   bot.action(/^settings:confidence:(ALL|HIGH_ONLY)$/, async (ctx) => {
@@ -13,14 +14,16 @@ export function registerCallbacks(bot: Telegraf): void {
 
     await chatSettingsRepository.setConfidenceFilter(chatId, filter);
     const { text, keyboard } = await renderSettings(chatId);
+    const settings = await chatSettingsRepository.ensure(chatId);
     await ctx.editMessageText(text, keyboard).catch(() => undefined);
-    await ctx.answerCbQuery(`Confidence: ${filter}`);
+    await ctx.answerCbQuery(t(settings.language ?? DEFAULT_LANGUAGE, "settings.cbConfidenceSet", { filter }));
   });
 
   bot.action(/^settings:net:(.+)$/, async (ctx) => {
     const value = ctx.match[1]!;
     const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
     const settings = await chatSettingsRepository.ensure(chatId);
+    const lang = settings.language ?? DEFAULT_LANGUAGE;
 
     if (value === "ALL") {
       await chatSettingsRepository.setNetworksFilter(chatId, null);
@@ -28,7 +31,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const next = toggleNetworkFilter(settings.networksFilter, value);
       await chatSettingsRepository.setNetworksFilter(chatId, next);
     } else {
-      await ctx.answerCbQuery("Unknown network");
+      await ctx.answerCbQuery(t(lang, "settings.cbUnknownNetwork"));
       return;
     }
 
@@ -39,27 +42,37 @@ export function registerCallbacks(bot: Telegraf): void {
 
   bot.action(/^list:page:(\d+)$/, async (ctx) => {
     const page = Number(ctx.match[1]);
-    const { text, keyboard } = await renderListPage(page);
+    const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
+    const settings = await chatSettingsRepository.ensure(chatId);
+    const { text, keyboard } = await renderListPage(page, settings.language ?? DEFAULT_LANGUAGE);
     await ctx.editMessageText(text, keyboard).catch(() => undefined);
     await ctx.answerCbQuery();
   });
 
   bot.action(/^remove:confirm:(0x[a-fA-F0-9]{40})$/, async (ctx) => {
     const address = getAddress(ctx.match[1]!);
+    const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
+    const settings = await chatSettingsRepository.ensure(chatId);
+    const lang = settings.language ?? DEFAULT_LANGUAGE;
+
     const removedCount = await tokenRepository.removeByAddress(address);
 
     await ctx
       .editMessageText(
         removedCount > 0
-          ? `🗑 Removed ${address} (${removedCount} network entr${removedCount === 1 ? "y" : "ies"}).`
-          : `${address} was not being tracked (already removed?).`,
+          ? t(lang, "removeToken.removed", { address, count: removedCount, entries: t(lang, "removeToken.entriesWord") })
+          : t(lang, "removeToken.alreadyRemoved", { address }),
       )
       .catch(() => undefined);
     await ctx.answerCbQuery();
   });
 
   bot.action("remove:cancel", async (ctx) => {
-    await ctx.editMessageText("Cancelled — token is still tracked.").catch(() => undefined);
-    await ctx.answerCbQuery("Cancelled");
+    const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
+    const settings = await chatSettingsRepository.ensure(chatId);
+    const lang = settings.language ?? DEFAULT_LANGUAGE;
+
+    await ctx.editMessageText(t(lang, "removeToken.cancelled")).catch(() => undefined);
+    await ctx.answerCbQuery(t(lang, "removeToken.cancelled"));
   });
 }

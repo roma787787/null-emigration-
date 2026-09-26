@@ -55,5 +55,15 @@ CREATE TABLE IF NOT EXISTS chat_settings (
     chat_id           TEXT PRIMARY KEY,
     confidence_filter TEXT NOT NULL DEFAULT 'ALL' CHECK (confidence_filter IN ('ALL', 'HIGH_ONLY')),
     networks_filter   TEXT[],
+    -- NULL = the chat hasn't picked a language yet (shows the language picker).
+    language          TEXT CHECK (language IN ('en', 'uk', 'ru')),
+    approved          BOOLEAN NOT NULL DEFAULT false,
+    -- Set once an admin approval request has been sent for this chat, so
+    -- re-running /start or changing language doesn't spam admins again.
+    access_requested  BOOLEAN NOT NULL DEFAULT false,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS language TEXT CHECK (language IN ('en', 'uk', 'ru'));
+ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS access_requested BOOLEAN NOT NULL DEFAULT false;

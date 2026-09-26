@@ -6,31 +6,18 @@ import { registerAddOwnerCommand } from "./commands/addOwner.js";
 import { registerRemoveOwnerCommand } from "./commands/removeOwner.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerCallbacks } from "./callbacks.js";
+import { registerAccessControl, isAdminChat } from "./accessControl.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
 import { chatSettingsRepository } from "../db/repositories/chatSettingsRepository.js";
 import type { AnalyzedMigration } from "../queue/notificationQueue.js";
+import { DEFAULT_LANGUAGE } from "./i18n/index.js";
 import { logger } from "../utils/logger.js";
-
-const WELCOME_TEXT = [
-  "🛰 Multi-EVM Migration Tracker",
-  "",
-  "Watches token owners/admins across EVM networks for new contract deployments, and flags the ones that look like a migration into a new token.",
-  "",
-  "Commands:",
-  "/add_token <network> <address> — track a token, auto-discover its owners",
-  "/list — tracked tokens and their owners (paginated)",
-  "/remove_token <address> — stop tracking a token (asks to confirm)",
-  "/add_owner <network> <token> <owner> — manually link an extra wallet (dev, multisig) to a tracked token",
-  "/remove_owner <network> <token> <owner> — unlink a manually-added wallet",
-  "/settings — toggle which confidence level / networks alert this chat",
-  "/help — show this message again",
-].join("\n");
 
 export function createBot(token: string): Telegraf {
   const bot = new Telegraf(token);
 
-  bot.start((ctx) => ctx.reply(WELCOME_TEXT));
-  bot.help((ctx) => ctx.reply(WELCOME_TEXT));
+  // Registered first so its gate middleware runs before every other handler.
+  registerAccessControl(bot);
 
   registerAddTokenCommand(bot);
   registerListCommand(bot);
@@ -48,17 +35,19 @@ export function createBot(token: string): Telegraf {
 }
 
 /**
- * Sends the alert card (section 4.4) to every chat subscribed to this
- * network at this confidence level or lower filtering requirements.
+ * Sends the alert card (section 4.4) to every approved chat subscribed to
+ * this network at this confidence level, in that chat's chosen language.
  */
 export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedMigration): Promise<void> {
   const { token, migrationContract } = analyzed;
   const chats = await chatSettingsRepository.listAll();
-  const message = formatMigrationAlert(token, migrationContract);
 
   for (const chat of chats) {
+    if (!chat.approved && !isAdminChat(chat.chatId)) continue;
     if (chat.confidenceFilter === "HIGH_ONLY" && migrationContract.confidence !== "HIGH") continue;
     if (chat.networksFilter && !chat.networksFilter.includes(token.network)) continue;
+
+    const message = formatMigrationAlert(token, migrationContract, chat.language ?? DEFAULT_LANGUAGE);
 
     try {
       await bot.telegram.sendMessage(chat.chatId, message, {
