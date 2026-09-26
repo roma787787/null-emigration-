@@ -1,5 +1,5 @@
 import { pool } from "../client.js";
-import type { ConfidenceLevel, MigrationContractRecord, NetworkKey } from "../../types/index.js";
+import type { ConfidenceLevel, MigrationContractRecord, NetworkKey, TokenBSource } from "../../types/index.js";
 
 interface MigrationContractRow {
   id: number;
@@ -9,7 +9,12 @@ interface MigrationContractRow {
   creator_address: string;
   token_b_address: string | null;
   confidence: string;
+  confidence_score: number;
   matched_functions: string[];
+  matched_events: string[];
+  matched_auxiliary: string[];
+  token_b_source: string | null;
+  matched_getter: string | null;
   tx_hash: string;
   block_number: string;
   detected_at: Date;
@@ -24,7 +29,12 @@ function toRecord(row: MigrationContractRow): MigrationContractRecord {
     creatorAddress: row.creator_address as `0x${string}`,
     tokenBAddress: row.token_b_address as `0x${string}` | null,
     confidence: row.confidence as ConfidenceLevel,
+    confidenceScore: row.confidence_score,
     matchedFunctions: row.matched_functions,
+    matchedEvents: row.matched_events,
+    matchedAuxiliary: row.matched_auxiliary,
+    tokenBSource: row.token_b_source as TokenBSource | null,
+    matchedGetter: row.matched_getter,
     txHash: row.tx_hash as `0x${string}`,
     blockNumber: BigInt(row.block_number),
     detectedAt: row.detected_at,
@@ -39,14 +49,20 @@ export const migrationContractRepository = {
     creatorAddress: `0x${string}`;
     tokenBAddress: `0x${string}` | null;
     confidence: ConfidenceLevel;
+    confidenceScore: number;
     matchedFunctions: string[];
+    matchedEvents: string[];
+    matchedAuxiliary: string[];
+    tokenBSource: TokenBSource | null;
+    matchedGetter: string | null;
     txHash: `0x${string}`;
     blockNumber: bigint;
   }): Promise<MigrationContractRecord | null> {
     const { rows } = await pool.query<MigrationContractRow>(
       `INSERT INTO migration_contracts
-         (token_id, network, contract_address, creator_address, token_b_address, confidence, matched_functions, tx_hash, block_number)
-       VALUES ($1, $2, lower($3), lower($4), lower($5), $6, $7, $8, $9)
+         (token_id, network, contract_address, creator_address, token_b_address, confidence, confidence_score,
+          matched_functions, matched_events, matched_auxiliary, token_b_source, matched_getter, tx_hash, block_number)
+       VALUES ($1, $2, lower($3), lower($4), lower($5), $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (network, contract_address) DO NOTHING
        RETURNING *`,
       [
@@ -56,7 +72,12 @@ export const migrationContractRepository = {
         input.creatorAddress,
         input.tokenBAddress,
         input.confidence,
+        input.confidenceScore,
         input.matchedFunctions,
+        input.matchedEvents,
+        input.matchedAuxiliary,
+        input.tokenBSource,
+        input.matchedGetter,
         input.txHash,
         input.blockNumber.toString(),
       ],

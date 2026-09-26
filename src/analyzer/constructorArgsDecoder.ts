@@ -69,3 +69,38 @@ export async function findTokenBInConstructorArgs(
   }
   return null;
 }
+
+export interface ConstructorArgsMatch {
+  address: Address;
+  /** `token_a` — the constructor references the token being tracked itself (a strong, free signal, no RPC needed to confirm it). `token_b` — a distinct address that looks like an ERC-20. */
+  matchType: "token_a" | "token_b";
+}
+
+/**
+ * Like findTokenBInConstructorArgs, but also checks whether any candidate is
+ * the tracked Token A's own address — spec 4.3.1 counts that as a migration
+ * signal too (many migration contracts take the old token as a constructor
+ * arg alongside, or instead of, the new one). The self-reference check is
+ * a free string comparison, so it's tried before any RPC call.
+ */
+export async function findTokenAOrBInConstructorArgs(
+  client: PublicClient,
+  input: `0x${string}` | string,
+  tokenAAddress: Address,
+): Promise<ConstructorArgsMatch | null> {
+  const candidates = extractAddressCandidatesFromConstructorArgs(input);
+
+  for (const candidate of candidates) {
+    if (isAddressEqual(candidate, tokenAAddress)) {
+      return { address: candidate, matchType: "token_a" };
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (await looksLikeErc20(client, candidate)) {
+      return { address: candidate, matchType: "token_b" };
+    }
+  }
+
+  return null;
+}

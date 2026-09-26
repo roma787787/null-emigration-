@@ -7,14 +7,19 @@ migration mechanism into a second token, and pushes alert cards to Telegram.
 Implements the architecture from the project spec:
 
 1. **Token & Owner DB** — tracked "Token A" contracts plus their discovered
-   deployer / `owner()` / `admin()` / `DEFAULT_ADMIN_ROLE` addresses.
-2. **Multi-EVM block listener** — polls new blocks on every configured
-   network and flags contract-creation transactions from tracked owners.
-3. **Migration analyzer** — decodes constructor args, scans bytecode for
-   migration-style function selectors, and static-calls common "Token B"
-   getters to assign a HIGH / MEDIUM / LOW confidence score.
-4. **Telegram bot** — `/add_token`, `/list`, `/remove_token`, `/settings`,
-   and the alert card itself.
+   deployer / `owner()` / `admin()` / `DEFAULT_ADMIN_ROLE` addresses, plus any
+   manually-linked wallets (`/add_owner`).
+2. **Multi-EVM block listener** — subscribes to new blocks (WebSocket push
+   when available, HTTP polling otherwise) on every configured network and
+   flags contract-creation transactions from tracked owners, including ones
+   deployed through a factory.
+3. **Migration analyzer** — decodes constructor args (including a Token-A
+   self-reference check), scans bytecode for migration-style function
+   selectors *and* event topics, static-calls "Token B" getters plus
+   auxiliary signals (`oldToken()`, `rate()`), and assigns a HIGH / MEDIUM /
+   LOW confidence label with a supplementary 0–100% score.
+4. **Telegram bot** — `/add_token`, `/list`, `/remove_token`, `/add_owner`,
+   `/remove_owner`, `/settings`, and the alert card itself.
 
 ## Stack
 
@@ -24,8 +29,8 @@ TypeScript (Node.js) + [viem](https://viem.sh) + PostgreSQL + Redis
 ## Supported networks
 
 Ethereum, BNB Smart Chain, Arbitrum One, Base, Optimism, Polygon, Avalanche,
-Linea, Scroll, Blast, Polygon zkEVM — see `src/config/networks.ts`. Adding a
-network means adding one entry there plus an `RPC_<NETWORK>` env var.
+Linea, Scroll, Blast, Polygon zkEVM, HyperEVM — see `src/config/networks.ts`.
+Adding a network means adding one entry there plus an `RPC_<NETWORK>` env var.
 
 ## Getting started
 
@@ -44,8 +49,11 @@ npm run dev                # or: npm run build && npm start
 - `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather).
 - `RPC_<NETWORK>` (e.g. `RPC_ETHEREUM`, `RPC_ARBITRUM`) — comma-separated
   list of RPC URLs; the first is primary, the rest are automatic failover
-  endpoints (Alchemy / QuickNode / Ankr, etc). Public fallback RPCs are used
-  if unset, but they are rate-limited and unsuitable for production.
+  endpoints (Alchemy / QuickNode / Ankr / Blockpi, etc). A `wss://` URL gets
+  a push WebSocket subscription for near-instant new-block notifications
+  (needed for the spec's 5–10s alert-latency target); `http(s)://` falls
+  back to polling. Public fallback RPCs (HTTP only) are used if unset, but
+  they're rate-limited and unsuitable for production.
 - `ETHERSCAN_API_KEY` — optional, enables "Contract Creator" (deployer)
   lookups via Etherscan's unified multichain API (one key covers every
   supported network). Without it, owner discovery still works for tokens
@@ -115,3 +123,19 @@ exercise meaningfully and are better validated against a real deployment.
 - **Deployer lookup** uses Etherscan's unified multichain API (`chainid`
   param), so `ETHERSCAN_API_KEY` alone covers every supported network — no
   per-network key needed.
+- **Mempool monitoring is intentionally not implemented.** The spec lists it
+  as a data source, but for this use case it wouldn't actually shorten the
+  alert path: a `CREATE` contract's address is derivable pre-confirmation,
+  but its bytecode — which the analyzer needs for selector/event scanning —
+  only exists once the deploy tx is mined, so watching pending transactions
+  buys at most one RPC round-trip versus reacting to the mined block. The
+  WebSocket block subscription above gets the real latency win; mempool
+  watching would add a second live subscription and reconnect-handling path
+  for a marginal gain, so it's left out rather than half-built.
+- **Confidence score is a supplementary display number, not a threshold
+  gate.** The HIGH/MEDIUM/LOW label (which `/settings confidence high`
+  filters on) follows the spec's rule directly — needs a Token B signal
+  *and* migration-style functions for HIGH. The 0–100% score in the card
+  (`src/analyzer/migrationAnalyzer.ts: computeConfidenceScore`) is a
+  separately-weighted number for the same evidence, shown for extra context;
+  it isn't what decides the label.

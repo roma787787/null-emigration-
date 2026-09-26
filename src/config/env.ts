@@ -27,6 +27,7 @@ const allNetworkKeys: NetworkKey[] = [
   "scroll",
   "blast",
   "polygon-zkevm",
+  "hyperevm",
 ];
 
 export const env = {

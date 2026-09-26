@@ -4,6 +4,7 @@ import {
   base,
   blast,
   bsc,
+  hyperEvm,
   linea,
   mainnet,
   optimism,
@@ -38,6 +39,7 @@ const dexscreenerChainSlug: Record<NetworkKey, string> = {
   scroll: "scroll",
   blast: "blast",
   "polygon-zkevm": "polygonzkevm",
+  hyperevm: "hyperevm",
 };
 
 function explorerUrls(baseUrl: string) {
@@ -117,6 +119,12 @@ const rawConfigs: Record<NetworkKey, { label: string; chain: Chain; explorerBase
     chain: polygonZkEvm,
     explorerBaseUrl: "https://zkevm.polygonscan.com",
     defaultRpcUrls: ["https://zkevm-rpc.com"],
+  },
+  hyperevm: {
+    label: "HyperEVM",
+    chain: hyperEvm,
+    explorerBaseUrl: "https://hyperevmscan.io",
+    defaultRpcUrls: ["https://rpc.hyperliquid.xyz/evm"],
   },
 };
 

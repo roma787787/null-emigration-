@@ -9,7 +9,8 @@ export type NetworkKey =
   | "linea"
   | "scroll"
   | "blast"
-  | "polygon-zkevm";
+  | "polygon-zkevm"
+  | "hyperevm";
 
 export type OwnerSource = "deployer" | "owner" | "admin" | "default_admin_role" | "manual";
 
@@ -43,7 +44,12 @@ export interface MigrationContractRecord {
   creatorAddress: `0x${string}`;
   tokenBAddress: `0x${string}` | null;
   confidence: ConfidenceLevel;
+  confidenceScore: number;
   matchedFunctions: string[];
+  matchedEvents: string[];
+  matchedAuxiliary: string[];
+  tokenBSource: TokenBSource | null;
+  matchedGetter: string | null;
   txHash: `0x${string}`;
   blockNumber: bigint;
   detectedAt: Date;
@@ -56,11 +62,17 @@ export interface ChatSettingsRecord {
   createdAt: Date;
 }
 
+export type TokenBSource = "constructor_args" | "static_call" | "token_a_match";
+
 export interface MigrationAnalysisResult {
   confidence: ConfidenceLevel;
+  confidenceScore: number;
   tokenBAddress: `0x${string}` | null;
-  tokenBSource: "constructor_args" | "static_call" | null;
+  tokenBSource: TokenBSource | null;
+  matchedGetter: string | null;
   matchedFunctions: string[];
+  matchedEvents: string[];
+  matchedAuxiliary: string[];
 }
 
 export interface ContractCreationEvent {

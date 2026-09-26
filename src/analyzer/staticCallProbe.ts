@@ -41,3 +41,29 @@ export async function probeForTokenB(client: PublicClient, contractAddress: Addr
 
   return { tokenBAddress: null, matchedGetter: null };
 }
+
+/**
+ * Secondary getters that don't identify Token B on their own but are still
+ * evidence of migration/exchange logic (spec section 4.3.3): `oldToken()`
+ * usually mirrors Token A, `rate()` an exchange ratio. Their mere presence
+ * (the call not reverting) counts as a signal, regardless of the value.
+ */
+const AUXILIARY_ABI = [
+  { type: "function", name: "oldToken", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+  { type: "function", name: "rate", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+] as const;
+
+export async function probeAuxiliarySignals(client: PublicClient, contractAddress: Address): Promise<string[]> {
+  const matched: string[] = [];
+
+  for (const name of ["oldToken", "rate"] as const) {
+    try {
+      await client.readContract({ address: contractAddress, abi: AUXILIARY_ABI, functionName: name });
+      matched.push(name);
+    } catch {
+      // Getter not implemented.
+    }
+  }
+
+  return matched;
+}

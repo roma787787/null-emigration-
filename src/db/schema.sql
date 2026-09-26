@@ -24,19 +24,32 @@ CREATE TABLE IF NOT EXISTS token_owners (
 CREATE INDEX IF NOT EXISTS idx_token_owners_address ON token_owners (lower(address));
 
 CREATE TABLE IF NOT EXISTS migration_contracts (
-    id                SERIAL PRIMARY KEY,
-    token_id          INTEGER NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
-    network           TEXT NOT NULL,
-    contract_address  TEXT NOT NULL,
-    creator_address   TEXT NOT NULL,
-    token_b_address   TEXT,
-    confidence        TEXT NOT NULL CHECK (confidence IN ('HIGH', 'MEDIUM', 'LOW')),
-    matched_functions TEXT[] NOT NULL DEFAULT '{}',
-    tx_hash           TEXT NOT NULL,
-    block_number      BIGINT NOT NULL,
-    detected_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id                 SERIAL PRIMARY KEY,
+    token_id           INTEGER NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+    network            TEXT NOT NULL,
+    contract_address   TEXT NOT NULL,
+    creator_address    TEXT NOT NULL,
+    token_b_address    TEXT,
+    confidence         TEXT NOT NULL CHECK (confidence IN ('HIGH', 'MEDIUM', 'LOW')),
+    confidence_score   SMALLINT NOT NULL DEFAULT 0,
+    matched_functions  TEXT[] NOT NULL DEFAULT '{}',
+    matched_events     TEXT[] NOT NULL DEFAULT '{}',
+    matched_auxiliary  TEXT[] NOT NULL DEFAULT '{}',
+    token_b_source     TEXT,
+    matched_getter     TEXT,
+    tx_hash            TEXT NOT NULL,
+    block_number       BIGINT NOT NULL,
+    detected_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (network, contract_address)
 );
+
+-- Idempotent upgrades for deployments created before these columns existed
+-- (CREATE TABLE IF NOT EXISTS above is a no-op once the table already exists).
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS confidence_score SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS matched_events TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS matched_auxiliary TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS token_b_source TEXT;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS matched_getter TEXT;
 
 CREATE TABLE IF NOT EXISTS chat_settings (
     chat_id           TEXT PRIMARY KEY,

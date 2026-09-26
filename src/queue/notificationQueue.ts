@@ -81,7 +81,7 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
         return;
       }
 
-      const analysis = await analyzeMigrationContract(data.network, data.contractAddress, data.input);
+      const analysis = await analyzeMigrationContract(data.network, data.contractAddress, data.input, token.address);
 
       const migrationContract = await migrationContractRepository.create({
         tokenId: token.id,
@@ -90,7 +90,12 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
         creatorAddress: data.creatorAddress,
         tokenBAddress: analysis.tokenBAddress,
         confidence: analysis.confidence,
+        confidenceScore: analysis.confidenceScore,
         matchedFunctions: analysis.matchedFunctions,
+        matchedEvents: analysis.matchedEvents,
+        matchedAuxiliary: analysis.matchedAuxiliary,
+        tokenBSource: analysis.tokenBSource,
+        matchedGetter: analysis.matchedGetter,
         txHash: data.txHash,
         blockNumber: BigInt(data.blockNumber),
       });
