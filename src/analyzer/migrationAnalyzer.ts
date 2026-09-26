@@ -28,25 +28,33 @@ interface ScoreInput {
   auxiliaryCount: number;
 }
 
+const SCORE_BANDS: Record<ConfidenceLevel, [number, number]> = {
+  LOW: [0, 39],
+  MEDIUM: [40, 69],
+  HIGH: [70, 100],
+};
+
 /**
- * A supplementary 0-100 display score (the "(95%)" in the spec's alert card
- * example) — weighted by how much evidence fired, on top of the categorical
- * HIGH/MEDIUM/LOW label above which is what settings/filtering actually key
- * off. A static-call getter returning Token B is the strongest single
- * signal; a bare Token A self-reference in the constructor is the weakest.
+ * The 0-100 display score (the "(95%)" in the spec's alert card example).
+ * It always lands inside its label's band — HIGH 70-100, MEDIUM 40-69,
+ * LOW 0-39 — so the card never shows e.g. "HIGH (35%)"; the weighted
+ * evidence only decides the position within that band. A static-call getter
+ * returning Token B is the strongest single signal, a bare Token A
+ * reference in the constructor the weakest.
  */
-export function computeConfidenceScore(input: ScoreInput): number {
-  let score = 0;
+export function computeConfidenceScore(confidence: ConfidenceLevel, input: ScoreInput): number {
+  let evidence = 0;
 
-  if (input.tokenBSource === "static_call") score += 45;
-  else if (input.tokenBSource === "constructor_args") score += 35;
-  else if (input.tokenBSource === "token_a_match") score += 20;
+  if (input.tokenBSource === "static_call") evidence += 45;
+  else if (input.tokenBSource === "constructor_args") evidence += 35;
+  else if (input.tokenBSource === "token_a_match") evidence += 20;
 
-  score += Math.min(input.functionCount, 2) * 15;
-  score += Math.min(input.eventCount, 2) * 10;
-  score += Math.min(input.auxiliaryCount, 2) * 5;
+  evidence += Math.min(input.functionCount, 2) * 15;
+  evidence += Math.min(input.eventCount, 2) * 10;
+  evidence += Math.min(input.auxiliaryCount, 2) * 5;
 
-  return Math.min(100, score);
+  const [min, max] = SCORE_BANDS[confidence];
+  return min + Math.round((Math.min(100, evidence) / 100) * (max - min));
 }
 
 export async function analyzeMigrationContract(
@@ -66,7 +74,7 @@ export async function analyzeMigrationContract(
     return [] as string[];
   });
 
-  const staticProbe = await probeForTokenB(client, contractAddress).catch((err) => {
+  const staticProbe = await probeForTokenB(client, contractAddress, tokenAAddress).catch((err) => {
     logger.warn({ err, network, contractAddress }, "Static call probe failed");
     return { tokenBAddress: null, matchedGetter: null };
   });
@@ -82,14 +90,19 @@ export async function analyzeMigrationContract(
         return null;
       },
     );
-    if (constructorMatch) {
-      tokenBAddress = constructorMatch.address;
-      tokenBSource = constructorMatch.matchType === "token_a" ? "token_a_match" : "constructor_args";
+    if (constructorMatch?.tokenB) {
+      tokenBAddress = constructorMatch.tokenB;
+      tokenBSource = "constructor_args";
+    } else if (constructorMatch?.referencesTokenA) {
+      // A Token A reference counts as a token signal, but Token B stays unset
+      // so the card never presents the old token as the migration target.
+      tokenBSource = "token_a_match";
     }
   }
 
-  const confidence = computeConfidence(matchedFunctions.length > 0, tokenBAddress !== null);
-  const confidenceScore = computeConfidenceScore({
+  const hasTokenSignal = tokenBAddress !== null || tokenBSource === "token_a_match";
+  const confidence = computeConfidence(matchedFunctions.length > 0, hasTokenSignal);
+  const confidenceScore = computeConfidenceScore(confidence, {
     tokenBSource,
     functionCount: matchedFunctions.length,
     eventCount: matchedEvents.length,

@@ -16,8 +16,6 @@ function tokenBSourceLabel(lang: Language, migration: MigrationContractRecord): 
       return t(lang, "card.sourceStaticCall", { getter: migration.matchedGetter ?? "" });
     case "constructor_args":
       return t(lang, "card.sourceConstructor");
-    case "token_a_match":
-      return t(lang, "card.sourceTokenAMatch");
     default:
       return "";
   }
@@ -49,7 +47,9 @@ export function formatMigrationAlert(token: TokenRecord, migration: MigrationCon
 
   const tokenBLine = migration.tokenBAddress
     ? `${escapeMd(migration.tokenBAddress)} \\[${escapeMd(t(lang, "card.foundIn"))} ${escapeMd(tokenBSourceLabel(lang, migration))}\\]`
-    : `_${escapeMd(t(lang, "card.notSetYet"))}_`;
+    : migration.tokenBSource === "token_a_match"
+      ? `_${escapeMd(t(lang, "card.notSetYet"))}_ \\(${escapeMd(t(lang, "card.tokenARefNote"))}\\)`
+      : `_${escapeMd(t(lang, "card.notSetYet"))}_`;
 
   const signals = foundSignals(lang, migration);
   const signalsLine = signals.length > 0 ? signals.map(escapeMd).join(", ") : `_${escapeMd(t(lang, "card.noSignals"))}_`;

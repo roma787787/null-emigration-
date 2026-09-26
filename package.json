@@ -13,7 +13,8 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
-    "test": "node --import tsx --test"
+    "test": "node --import tsx --test",
+    "test:e2e": "tsx e2e/run.ts"
   },
   "dependencies": {
     "bullmq": "^5.12.0",

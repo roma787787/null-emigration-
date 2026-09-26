@@ -39,9 +39,7 @@ export function startBlockListener(network: NetworkKey, onContractCreation: Cont
     processing = processing.then(async () => {
       const from = lastProcessedBlock === null ? blockNumber : lastProcessedBlock + 1n;
       for (let bn = from; bn <= blockNumber; bn++) {
-        await processBlock(network, bn, onContractCreation).catch((err) => {
-          logger.error({ err, network, blockNumber: bn.toString() }, "Failed to process block");
-        });
+        await processBlockWithRetry(network, bn, onContractCreation);
       }
       lastProcessedBlock = blockNumber;
     });
@@ -75,6 +73,31 @@ export function startBlockListener(network: NetworkKey, onContractCreation: Cont
 
   logger.info({ network, mode: usesWebSocket ? "websocket" : "polling" }, "Started block listener");
   return unwatch;
+}
+
+const BLOCK_RETRY_DELAYS_MS = [1_000, 3_000, 10_000];
+
+// A transient RPC/Redis failure must not silently drop a block's deployments,
+// so each block is retried with backoff before it's given up on.
+async function processBlockWithRetry(
+  network: NetworkKey,
+  blockNumber: bigint,
+  onContractCreation: ContractCreationHandler,
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await processBlock(network, blockNumber, onContractCreation);
+      return;
+    } catch (err) {
+      const delay = BLOCK_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        logger.error({ err, network, blockNumber: blockNumber.toString() }, "Giving up on block after retries");
+        return;
+      }
+      logger.warn({ err, network, blockNumber: blockNumber.toString(), attempt: attempt + 1 }, "Block processing failed, retrying");
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }
 
 async function processBlock(network: NetworkKey, blockNumber: bigint, onContractCreation: ContractCreationHandler) {

@@ -21,9 +21,15 @@ export interface StaticCallProbeResult {
 
 /**
  * Calls each known "destination token" getter on the freshly deployed
- * contract and returns the first one that resolves to a non-zero address.
+ * contract and returns the first one that resolves to a non-zero address
+ * other than Token A (a generic `token()` getter often points at the old
+ * token, which must not be reported as the migration target).
  */
-export async function probeForTokenB(client: PublicClient, contractAddress: Address): Promise<StaticCallProbeResult> {
+export async function probeForTokenB(
+  client: PublicClient,
+  contractAddress: Address,
+  tokenAAddress: Address,
+): Promise<StaticCallProbeResult> {
   for (const name of TOKEN_B_GETTERS) {
     try {
       const result = await client.readContract({
@@ -31,7 +37,11 @@ export async function probeForTokenB(client: PublicClient, contractAddress: Addr
         abi: GETTER_ABI,
         functionName: name,
       });
-      if (typeof result === "string" && !isAddressEqual(result as Address, zeroAddress)) {
+      if (
+        typeof result === "string" &&
+        !isAddressEqual(result as Address, zeroAddress) &&
+        !isAddressEqual(result as Address, tokenAAddress)
+      ) {
         return { tokenBAddress: getAddress(result), matchedGetter: name };
       }
     } catch {

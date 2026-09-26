@@ -49,7 +49,8 @@ export async function enqueueContractCreation(event: TrackedContractCreationEven
       tokenId,
     },
     {
-      jobId: `${event.network}:${event.contractAddress.toLowerCase()}`,
+      // BullMQ rejects custom job ids containing ":" (its own key separator).
+      jobId: `${event.network}-${event.contractAddress.toLowerCase()}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 5_000 },
       removeOnComplete: 1000,

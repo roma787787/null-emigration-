@@ -71,36 +71,33 @@ export async function findTokenBInConstructorArgs(
 }
 
 export interface ConstructorArgsMatch {
-  address: Address;
-  /** `token_a` — the constructor references the token being tracked itself (a strong, free signal, no RPC needed to confirm it). `token_b` — a distinct address that looks like an ERC-20. */
-  matchType: "token_a" | "token_b";
+  /** A distinct ERC-20 other than Token A — the real Token B candidate. */
+  tokenB: Address | null;
+  /** Whether the constructor also references the tracked Token A itself. */
+  referencesTokenA: boolean;
 }
 
 /**
- * Like findTokenBInConstructorArgs, but also checks whether any candidate is
- * the tracked Token A's own address — spec 4.3.1 counts that as a migration
- * signal too (many migration contracts take the old token as a constructor
- * arg alongside, or instead of, the new one). The self-reference check is
- * a free string comparison, so it's tried before any RPC call.
+ * Like findTokenBInConstructorArgs, but also reports whether any candidate
+ * is the tracked Token A's own address — spec 4.3.1 counts that as a
+ * migration signal too (migration contracts typically take the old token
+ * alongside the new one). Token A is excluded from the Token B search so a
+ * `(tokenA, tokenB)` constructor never reports the old token as the target.
  */
 export async function findTokenAOrBInConstructorArgs(
   client: PublicClient,
   input: `0x${string}` | string,
   tokenAAddress: Address,
-): Promise<ConstructorArgsMatch | null> {
+): Promise<ConstructorArgsMatch> {
   const candidates = extractAddressCandidatesFromConstructorArgs(input);
+  const referencesTokenA = candidates.some((c) => isAddressEqual(c, tokenAAddress));
 
   for (const candidate of candidates) {
-    if (isAddressEqual(candidate, tokenAAddress)) {
-      return { address: candidate, matchType: "token_a" };
-    }
-  }
-
-  for (const candidate of candidates) {
+    if (isAddressEqual(candidate, tokenAAddress)) continue;
     if (await looksLikeErc20(client, candidate)) {
-      return { address: candidate, matchType: "token_b" };
+      return { tokenB: candidate, referencesTokenA };
     }
   }
 
-  return null;
+  return { tokenB: null, referencesTokenA };
 }

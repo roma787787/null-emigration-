@@ -127,9 +127,29 @@ npm test        # node's built-in test runner + tsx, covers pure logic:
 npm run typecheck
 ```
 
-Network-, Postgres- and Redis-dependent code (RPC calls, the block listener,
-repositories) isn't covered by these — they need live infrastructure to
-exercise meaningfully and are better validated against a real deployment.
+### End-to-end test (local chain)
+
+`npm run test:e2e` runs the real pipeline — WebSocket block listener →
+BullMQ → analyzer → Postgres → alert card — against a local
+[anvil](https://book.getfoundry.sh/anvil/) chain. It deploys the fixture
+contracts in `e2e/Fixtures.sol` from a tracked owner and checks each
+verdict:
+
+| Scenario | Expected |
+|---|---|
+| `newToken()`/`oldToken()`/`rate()` getters + `migrate()` + `Migrated` event | HIGH, Token B via getter |
+| Tokens only in private storage (constructor args) | HIGH, Token B via constructor |
+| Constructor references only Token A | HIGH, Token B left unset |
+| `claim()` but no token configured yet | MEDIUM |
+| Unrelated contract | LOW |
+| Same contract deployed by a non-owner wallet | not detected |
+| Migrator deployed through a factory via `CREATE2` | HIGH (trace-based detection) |
+
+Prerequisites: `anvil --block-time 1` on `:8545`, plus Postgres and Redis
+(`docker compose up -d`). The Telegram send itself is the only thing not
+exercised — the harness prints the rendered card instead. To change the
+fixtures, edit `e2e/Fixtures.sol` and regenerate `e2e/artifacts.json` with
+`npm i --no-save solc@0.8.24 && node e2e/compile.cjs`.
 
 ## Known limitations / extension points
 
