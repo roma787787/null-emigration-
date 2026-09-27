@@ -46,6 +46,7 @@ const en: Dict = {
   "addToken.invalidAddress": '"{address}" is not a valid EVM address.',
   "addToken.lookingUp": "Looking up {address} on {network}...",
   "addToken.success": "✅ Now tracking {symbol} ({address}) on {network}.\n\nDiscovered owners/admins:\n{owners}",
+  "addToken.refreshed": "ℹ️ {symbol} ({address}) on {network} is already tracked — owners re-checked.\n\nDiscovered owners/admins:\n{owners}",
   "addToken.ownersNone": "  • None found automatically — you can link wallets manually later.",
   "addToken.defaultSymbol": "token",
 
@@ -146,6 +147,7 @@ const uk: Dict = {
   "addToken.invalidAddress": '"{address}" не є коректною EVM-адресою.',
   "addToken.lookingUp": "Шукаю {address} у мережі {network}...",
   "addToken.success": "✅ Тепер відстежую {symbol} ({address}) у мережі {network}.\n\nЗнайдені власники/адміни:\n{owners}",
+  "addToken.refreshed": "ℹ️ {symbol} ({address}) у мережі {network} вже відстежується — власників перевірено заново.\n\nЗнайдені власники/адміни:\n{owners}",
   "addToken.ownersNone": "  • Автоматично нікого не знайдено — гаманці можна прив'язати вручну пізніше.",
   "addToken.defaultSymbol": "токен",
 
@@ -247,6 +249,7 @@ const ru: Dict = {
   "addToken.invalidAddress": '"{address}" не является корректным EVM-адресом.',
   "addToken.lookingUp": "Ищу {address} в сети {network}...",
   "addToken.success": "✅ Теперь отслеживаю {symbol} ({address}) в сети {network}.\n\nНайденные владельцы/админы:\n{owners}",
+  "addToken.refreshed": "ℹ️ {symbol} ({address}) в сети {network} уже отслеживается — владельцы перепроверены.\n\nНайденные владельцы/админы:\n{owners}",
   "addToken.ownersNone": "  • Автоматически никого не найдено — кошельки можно привязать вручную позже.",
   "addToken.defaultSymbol": "токен",
 

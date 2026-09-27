@@ -41,6 +41,7 @@ export function registerAddTokenCommand(bot: Telegraf): void {
     }
 
     const address = getAddress(addressArg);
+    const alreadyTracked = (await tokenRepository.findByNetworkAndAddress(network, address)) !== null;
 
     await ctx.reply(t(lang, "addToken.lookingUp", { address, network }));
 
@@ -74,7 +75,8 @@ export function registerAddTokenCommand(bot: Telegraf): void {
         : t(lang, "addToken.ownersNone");
 
     await ctx.reply(
-      t(lang, "addToken.success", {
+      // Re-adding re-runs owner discovery, so it doubles as a "refresh owners" action.
+      t(lang, alreadyTracked ? "addToken.refreshed" : "addToken.success", {
         symbol: symbol ?? t(lang, "addToken.defaultSymbol"),
         address,
         network,
