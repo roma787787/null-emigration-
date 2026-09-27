@@ -4,10 +4,12 @@ import { enabledNetworks } from "../../config/networks.js";
 import { env } from "../../config/env.js";
 import { getPublicClient } from "../../chain/provider.js";
 import { getListenerStatus, type ListenerStatus } from "../../chain/listenerStatus.js";
-import { traceDetectionStatus } from "../../chain/traceCreateDetector.js";
+import { blockTraceStatus, traceDetectionStatus } from "../../chain/traceCreateDetector.js";
+import { totalAutoStats, type AutoStats } from "../../chain/autoStats.js";
+import { isOkxConfigured, okxHealth } from "../../liquidity/okxLiquidity.js";
 import { statsRepository } from "../../db/repositories/statsRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
-import { getContractCreationQueue } from "../../queue/notificationQueue.js";
+import { getAutoDiscoveryQueue, getContractCreationQueue } from "../../queue/notificationQueue.js";
 import { isAdminChat } from "../accessControl.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
@@ -25,6 +27,10 @@ export interface NetworkReport {
   listener: ListenerStatus | undefined;
   head: bigint | null;
   trace: "on" | "unavailable" | "off";
+  /** Whole-block tracing for auto-discovery (factory deployments). */
+  blockTrace?: "on" | "unavailable" | "untested" | "off";
+  /** OKX quote health for this network's quote token; null when not configured. */
+  okx?: { ok: boolean; detail: string } | null;
 }
 
 export interface StatusReport {
@@ -32,6 +38,7 @@ export interface StatusReport {
   counts: { tokens: number; owners: number; contracts: number };
   queue: { waiting: number; active: number; delayed: number; failed: number };
   networks: NetworkReport[];
+  auto?: { enabled: boolean; okxConfigured: boolean; stats: AutoStats; waiting: number };
 }
 
 export function formatDuration(ms: number): string {
@@ -69,6 +76,11 @@ function networkLine(lang: Language, report: NetworkReport, now: number): string
   }
   const traceState = { on: "status.traceOn", unavailable: "status.traceUnavailable", off: "status.traceOff" }[report.trace];
   parts.push(t(lang, "status.trace", { state: t(lang, traceState) }));
+  if (report.blockTrace && report.blockTrace !== "off") {
+    const key = { on: "status.traceOn", unavailable: "status.traceUnavailable", untested: "status.traceUntested" }[report.blockTrace];
+    parts.push(t(lang, "status.blockTrace", { state: t(lang, key) }));
+  }
+  if (report.okx) parts.push(report.okx.ok ? "OKX ✅" : `OKX ❌ (${report.okx.detail.slice(0, 60)})`);
 
   const extra: string[] = [];
   if (listener.skippedBlocks > 0) extra.push(t(lang, "status.skipped", { count: listener.skippedBlocks }));
@@ -85,6 +97,22 @@ function networkLine(lang: Language, report: NetworkReport, now: number): string
   return [parts.join(" · "), ...extra.map((e) => `    ↳ ${e}`)].join("\n");
 }
 
+function autoLines(lang: Language, report: StatusReport): string[] {
+  if (!report.auto) return [];
+  if (!report.auto.enabled) return [t(lang, "status.autoOff")];
+  const { stats } = report.auto;
+  return [
+    t(lang, "status.auto", {
+      creations: stats.creations,
+      candidates: stats.candidates,
+      liquidity: stats.liquiditySkipped,
+      alerts: stats.alerts,
+      waiting: report.auto.waiting,
+    }),
+    t(lang, report.auto.okxConfigured ? "status.okxOn" : "status.okxOff"),
+  ];
+}
+
 export function formatStatus(lang: Language, report: StatusReport, now = Date.now()): string {
   const lines = [
     t(lang, "status.title"),
@@ -92,6 +120,7 @@ export function formatStatus(lang: Language, report: StatusReport, now = Date.no
     t(lang, "status.uptime", { uptime: formatDuration(report.uptimeSec * 1000) }),
     t(lang, "status.counts", report.counts),
     t(lang, "status.queue", report.queue),
+    ...autoLines(lang, report),
     "",
     t(lang, "status.networks"),
   ];
@@ -112,15 +141,19 @@ async function chainHead(network: NetworkKey): Promise<bigint | null> {
 }
 
 export async function collectStatus(): Promise<StatusReport> {
-  const [counts, jobCounts, networks] = await Promise.all([
+  const okxConfigured = isOkxConfigured();
+  const [counts, jobCounts, autoCounts, networks] = await Promise.all([
     statsRepository.counts(),
     getContractCreationQueue().getJobCounts("waiting", "active", "delayed", "failed"),
+    env.AUTO_DISCOVERY ? getAutoDiscoveryQueue().getJobCounts("waiting") : Promise.resolve({ waiting: 0 }),
     Promise.all(
       enabledNetworks().map(async (network): Promise<NetworkReport> => ({
         network,
         listener: getListenerStatus(network),
         head: await chainHead(network),
         trace: env.ENABLE_FACTORY_TRACE_DETECTION ? traceDetectionStatus(network) : "off",
+        blockTrace: env.AUTO_DISCOVERY && env.ENABLE_FACTORY_TRACE_DETECTION ? blockTraceStatus(network) : "off",
+        okx: okxConfigured ? await okxHealth(network).catch((err) => ({ ok: false, detail: String(err) })) : null,
       })),
     ),
   ]);
@@ -134,6 +167,7 @@ export async function collectStatus(): Promise<StatusReport> {
       failed: jobCounts.failed ?? 0,
     },
     networks,
+    auto: { enabled: env.AUTO_DISCOVERY, okxConfigured, stats: totalAutoStats(), waiting: autoCounts.waiting ?? 0 },
   };
 }
 

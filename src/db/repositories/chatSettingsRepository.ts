@@ -1,5 +1,5 @@
 import { pool } from "../client.js";
-import type { ChatSettingsRecord, ConfidenceFilter, Language, NetworkKey } from "../../types/index.js";
+import type { ChatSettingsRecord, ConfidenceFilter, Language, LiquidityLevel, NetworkKey } from "../../types/index.js";
 
 interface ChatSettingsRow {
   chat_id: string;
@@ -8,12 +8,16 @@ interface ChatSettingsRow {
   language: string | null;
   approved: boolean;
   access_requested: boolean;
+  liquidity_level: string;
+  auto_alerts: boolean;
   created_at: Date;
 }
 
 function toRecord(row: ChatSettingsRow): ChatSettingsRecord {
   return {
     chatId: row.chat_id,
+    liquidityLevel: row.liquidity_level === "LOW_CAP" ? "LOW_CAP" : "STRICT",
+    autoAlerts: row.auto_alerts,
     confidenceFilter: row.confidence_filter as ConfidenceFilter,
     networksFilter: (row.networks_filter as NetworkKey[] | null) ?? null,
     language: row.language as Language | null,
@@ -39,6 +43,22 @@ export const chatSettingsRepository = {
   async get(chatId: string): Promise<ChatSettingsRecord | null> {
     const { rows } = await pool.query<ChatSettingsRow>(`SELECT * FROM chat_settings WHERE chat_id = $1`, [chatId]);
     return rows[0] ? toRecord(rows[0]) : null;
+  },
+
+  async setLiquidityLevel(chatId: string, level: LiquidityLevel): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_settings (chat_id, liquidity_level) VALUES ($1, $2)
+       ON CONFLICT (chat_id) DO UPDATE SET liquidity_level = EXCLUDED.liquidity_level`,
+      [chatId, level],
+    );
+  },
+
+  async setAutoAlerts(chatId: string, enabled: boolean): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_settings (chat_id, auto_alerts) VALUES ($1, $2)
+       ON CONFLICT (chat_id) DO UPDATE SET auto_alerts = EXCLUDED.auto_alerts`,
+      [chatId, enabled],
+    );
   },
 
   async setConfidenceFilter(chatId: string, filter: ConfidenceFilter): Promise<void> {

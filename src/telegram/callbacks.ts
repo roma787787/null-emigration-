@@ -19,6 +19,22 @@ export function registerCallbacks(bot: Telegraf): void {
     await ctx.answerCbQuery(t(settings.language ?? DEFAULT_LANGUAGE, "settings.cbConfidenceSet", { filter }));
   });
 
+  bot.action(/^settings:liq:(STRICT|LOW_CAP)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
+    await chatSettingsRepository.setLiquidityLevel(chatId, ctx.match[1] as "STRICT" | "LOW_CAP");
+    const { text, keyboard } = await renderSettings(chatId);
+    await ctx.editMessageText(text, keyboard).catch(() => undefined);
+    await ctx.answerCbQuery();
+  });
+
+  bot.action(/^settings:auto:(on|off)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
+    await chatSettingsRepository.setAutoAlerts(chatId, ctx.match[1] === "on");
+    const { text, keyboard } = await renderSettings(chatId);
+    await ctx.editMessageText(text, keyboard).catch(() => undefined);
+    await ctx.answerCbQuery();
+  });
+
   bot.action(/^settings:net:(.+)$/, async (ctx) => {
     const value = ctx.match[1]!;
     const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);

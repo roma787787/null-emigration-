@@ -214,3 +214,59 @@ contract UsdtStyleToken {
     function issue(uint256 amount) external { totalSupply += amount; balanceOf[owner] += amount; }
     function redeem(uint256 amount) external { totalSupply -= amount; balanceOf[owner] -= amount; }
 }
+
+// ---- Auto-discovery fixtures -------------------------------------------------------
+
+/// Uniswap-V2-style pair: two tokens and swap(), but a pool, not a migration.
+contract FakePair {
+    address public token0;
+    address public token1;
+    constructor(address a, address b) { token0 = a; token1 = b; }
+    function swap(uint256, uint256, address, bytes calldata) external {}
+    function getReserves() external pure returns (uint112, uint112, uint32) { return (0, 0, 0); }
+}
+
+/// Meme token with fee-swap plumbing: "swap" in a token is not a migration.
+contract FeeToken {
+    string public name = "Fee Token";
+    string public symbol = "FEE";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply = 1e24;
+    address public pairedToken;
+    mapping(address => uint256) public balanceOf;
+    constructor(address paired) { pairedToken = paired; balanceOf[msg.sender] = totalSupply; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function swapTokensForEth(uint256) external {}
+    function swapBack() external {}
+}
+
+/// Names Token B only by ticker: must stay Unverified / LOW.
+contract SymbolOnlyMigrator {
+    address public oldToken;
+    string public newTokenSymbol = "NEWT";
+    constructor(address a) { oldToken = a; }
+    function migrate(uint256) external {}
+}
+
+/// The new token itself takes the old one in: Token B is the contract.
+contract MigratingToken {
+    string public name = "Migrated Token";
+    string public symbol = "MIG";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply;
+    address public oldToken;
+    mapping(address => uint256) public balanceOf;
+    constructor(address a) { oldToken = a; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function migrate(uint256 amount) external { totalSupply += amount; balanceOf[msg.sender] += amount; }
+}
+
+/// Tokenized-stock style migrator: ISIN / issuer getters.
+contract RwaMigrator {
+    address public oldToken;
+    address public newToken;
+    address public issuer;
+    string public isin = "US0378331005";
+    constructor(address a, address b) { oldToken = a; newToken = b; issuer = msg.sender; }
+    function migrate(uint256) external {}
+}

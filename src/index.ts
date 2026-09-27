@@ -2,7 +2,15 @@ import { assertTelegramConfigured } from "./config/env.js";
 import { enabledNetworks, networkConfigErrors, unknownEnabledNetworks } from "./config/networks.js";
 import { runMigrations } from "./db/migrate.js";
 import { startBlockListener } from "./chain/blockListener.js";
-import { enqueueContractCreation, startContractCreationWorker } from "./queue/notificationQueue.js";
+import {
+  enqueueAutoCandidate,
+  enqueueContractCreation,
+  startAutoDiscoveryWorker,
+  startContractCreationWorker,
+} from "./queue/notificationQueue.js";
+import { env } from "./config/env.js";
+import { custodianRepository, parseCustodianSeed } from "./db/repositories/custodianRepository.js";
+import { isOkxConfigured } from "./liquidity/okxLiquidity.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
 import { createBot, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
@@ -17,6 +25,19 @@ async function main() {
   const worker = startContractCreationWorker(async (analyzed) => {
     await broadcastMigrationAlert(bot, analyzed);
   });
+  const autoWorker = env.AUTO_DISCOVERY
+    ? startAutoDiscoveryWorker(async (analyzed) => {
+        await broadcastMigrationAlert(bot, analyzed);
+      })
+    : null;
+  if (env.AUTO_DISCOVERY && !isOkxConfigured()) {
+    logger.warn("Auto-discovery is on but OKX_API_KEY/OKX_SECRET_KEY/OKX_API_PASSPHRASE are not set: auto-discovered alerts will be held back");
+  }
+
+  // Known RWA deployers from CUSTODIAN_DEPLOYERS; more can be added with /add_custodian.
+  for (const c of parseCustodianSeed(process.env.CUSTODIAN_DEPLOYERS)) {
+    await custodianRepository.upsert(c.network, c.address, c.label);
+  }
 
   for (const error of networkConfigErrors) {
     logger.error({ error }, "Skipping misconfigured custom network (EXTRA_NETWORKS)");
@@ -32,11 +53,21 @@ async function main() {
   for (const network of enabledNetworks()) {
     try {
       stopListeners.push(
-        startBlockListener(network, async (event) => {
-          await enqueueContractCreation(event).catch((err) => {
-            logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue analysis job");
-          });
-        }),
+        startBlockListener(
+          network,
+          async (event) => {
+            await enqueueContractCreation(event).catch((err) => {
+              logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue analysis job");
+            });
+          },
+          env.AUTO_DISCOVERY && (env.autoDiscoveryNetworks().length === 0 || env.autoDiscoveryNetworks().includes(network))
+            ? async (event) => {
+                await enqueueAutoCandidate(event).catch((err) => {
+                  logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue auto-discovery job");
+                });
+              }
+            : undefined,
+        ),
       );
       started.push(network);
     } catch (err) {
@@ -59,7 +90,7 @@ async function main() {
     // Each listener finishes its current block and saves its cursor, so the
     // next start resumes exactly where this one stopped.
     await Promise.all(stopListeners.map((stop) => stop().catch(() => undefined)));
-    await Promise.all([worker.close(), ownerRefreshWorker?.close()]);
+    await Promise.all([worker.close(), autoWorker?.close(), ownerRefreshWorker?.close()]);
     process.exit(0);
   };
 

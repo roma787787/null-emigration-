@@ -7,6 +7,7 @@ import { registerRemoveOwnerCommand } from "./commands/removeOwner.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerAnalyzeCommand } from "./commands/analyze.js";
 import { registerStatusCommand } from "./commands/status.js";
+import { registerCustodianCommands } from "./commands/custodians.js";
 import { registerCallbacks } from "./callbacks.js";
 import { registerAccessControl, isAdminChat } from "./accessControl.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
@@ -16,6 +17,8 @@ import type { OwnersRefreshed } from "../chain/ownerRefresh.js";
 import { DEFAULT_LANGUAGE, t } from "./i18n/index.js";
 import { formatOwnerLines } from "./views/ownerLines.js";
 import { logger } from "../utils/logger.js";
+import { env } from "../config/env.js";
+import type { ChatSettingsRecord, MigrationContractRecord } from "../types/index.js";
 import { sendWithRetry } from "./send.js";
 
 export function createBot(token: string): Telegraf {
@@ -32,6 +35,7 @@ export function createBot(token: string): Telegraf {
   registerSettingsCommand(bot);
   registerAnalyzeCommand(bot);
   registerStatusCommand(bot);
+  registerCustodianCommands(bot);
   registerCallbacks(bot);
 
   bot.catch((err, ctx) => {
@@ -39,6 +43,19 @@ export function createBot(token: string): Telegraf {
   });
 
   return bot;
+}
+
+/**
+ * Auto-discovered contracts reach a chat only if it takes them, and only when
+ * OKX found an executable route for Token A within the chat's liquidity
+ * level (Strict: $1,000 / 5%, Low-Cap: $300 / 10%). Custodian (RWA)
+ * deployments skip the DEX test. Tracked projects are always delivered.
+ */
+export function wantsAutoAlert(chat: ChatSettingsRecord, migration: MigrationContractRecord): boolean {
+  if (migration.discovery === "tracked") return true;
+  if (!chat.autoAlerts) return false;
+  if (migration.discovery === "custodian" || !env.AUTO_REQUIRE_LIQUIDITY) return true;
+  return migration.liquidity?.[chat.liquidityLevel]?.status === "pass";
 }
 
 /**
@@ -52,7 +69,8 @@ export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedM
   for (const chat of chats) {
     if (!chat.approved && !isAdminChat(chat.chatId)) continue;
     if (chat.confidenceFilter === "HIGH_ONLY" && migrationContract.confidence !== "HIGH") continue;
-    if (chat.networksFilter && !chat.networksFilter.includes(token.network)) continue;
+    if (chat.networksFilter && !chat.networksFilter.includes(migrationContract.network)) continue;
+    if (!wantsAutoAlert(chat, migrationContract)) continue;
 
     const message = formatMigrationAlert(token, migrationContract, chat.language ?? DEFAULT_LANGUAGE, { update });
 

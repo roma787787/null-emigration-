@@ -13,6 +13,8 @@ const MAX_CONTRACTS_PER_TX = 5;
 
 export interface AnalyzedDeployment {
   contractAddress: Address;
+  /** Creation code + constructor args, for follow-up analysis. */
+  input: Hex;
   analysis: MigrationAnalysisResult;
 }
 
@@ -63,6 +65,7 @@ export async function analyzeDeployTx(
   for (const { address, input } of created.slice(0, MAX_CONTRACTS_PER_TX)) {
     deployments.push({
       contractAddress: address,
+      input,
       analysis: await analyzeMigrationContract(network, address, input, tokenACandidates),
     });
   }

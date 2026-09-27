@@ -18,6 +18,10 @@ export function buildSettingsText(settings: ChatSettingsRecord, lang: Language):
     t(lang, "settings.networksLabel", {
       networks: settings.networksFilter ? settings.networksFilter.join(", ") : t(lang, "settings.networksAll"),
     }),
+    t(lang, "settings.autoLabel", { state: t(lang, settings.autoAlerts ? "settings.on" : "settings.off") }),
+    t(lang, "settings.liquidityLabel", {
+      level: t(lang, settings.liquidityLevel === "LOW_CAP" ? "settings.levelLowCap" : "settings.levelStrict"),
+    }),
   ].join("\n");
 }
 
@@ -57,7 +61,28 @@ export function buildSettingsKeyboard(
     ),
   ];
 
-  return Markup.inlineKeyboard([confidenceRow, ...networkRows, allNetworksRow]);
+  const autoRow = [
+    Markup.button.callback(
+      `${t(lang, "settings.buttonAutoOn")}${checkmark(settings.autoAlerts)}`,
+      "settings:auto:on",
+    ),
+    Markup.button.callback(
+      `${t(lang, "settings.buttonAutoOff")}${checkmark(!settings.autoAlerts)}`,
+      "settings:auto:off",
+    ),
+  ];
+  const liquidityRow = [
+    Markup.button.callback(
+      `${t(lang, "settings.levelStrict")}${checkmark(settings.liquidityLevel === "STRICT")}`,
+      "settings:liq:STRICT",
+    ),
+    Markup.button.callback(
+      `${t(lang, "settings.levelLowCap")}${checkmark(settings.liquidityLevel === "LOW_CAP")}`,
+      "settings:liq:LOW_CAP",
+    ),
+  ];
+
+  return Markup.inlineKeyboard([confidenceRow, autoRow, liquidityRow, ...networkRows, allNetworksRow]);
 }
 
 function isNetworkActive(filter: NetworkKey[] | null, network: NetworkKey): boolean {

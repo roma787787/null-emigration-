@@ -38,6 +38,18 @@ export const env = {
   // How often every tracked token's owners/admins are re-discovered, so an
   // ownership transfer to a new wallet or multisig is picked up. 0 disables.
   OWNER_REFRESH_INTERVAL_HOURS: Number(process.env.OWNER_REFRESH_INTERVAL_HOURS ?? 24),
+  // Auto-discovery: analyze every contract created on the watched networks,
+  // not only those deployed by tracked wallets.
+  AUTO_DISCOVERY: process.env.AUTO_DISCOVERY !== "false",
+  // Auto-discovered alerts go out only when OKX found a route for Token A
+  // within the chat's liquidity level; "false" also sends unchecked ones.
+  AUTO_REQUIRE_LIQUIDITY: process.env.AUTO_REQUIRE_LIQUIDITY !== "false",
+  AUTO_CONCURRENCY: Number(process.env.AUTO_CONCURRENCY ?? 8),
+
+  /** Networks auto-discovery runs on (it reads and traces every block — the costly part); empty = every enabled network. */
+  autoDiscoveryNetworks(): string[] {
+    return parseList(process.env.AUTO_DISCOVERY_NETWORKS).map((k) => k.toLowerCase());
+  },
   LOG_LEVEL: process.env.LOG_LEVEL ?? "info",
   // Etherscan's unified multichain API (v2) — one key, `chainid` selects the
   // network. Covers deployer lookups on every network in networks.ts.

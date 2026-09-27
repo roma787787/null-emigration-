@@ -11,6 +11,8 @@ import type { MigrationContractRecord, NetworkKey, TokenRecord } from "../../typ
 import { formatMigrationAlert } from "../notificationFormatter.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
+import { analyzeAutoCandidate } from "../../analyzer/autoAnalyzer.js";
+import { checkLiquidityLevels } from "../../liquidity/okxLiquidity.js";
 
 function isTxHash(value: string): value is Hex {
   return isHex(value) && value.length === 66;
@@ -91,13 +93,18 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
         return;
       }
 
-      for (const { contractAddress, analysis } of result.deployments) {
+      for (const { contractAddress, input, analysis } of result.deployments) {
         const { tokenAAddress, ...fields } = analysis;
         const tokenA =
           candidates.find((c) => tokenAAddress && c.address.toLowerCase() === tokenAAddress.toLowerCase()) ?? null;
-        const record: MigrationContractRecord = {
+        let record: MigrationContractRecord = {
           id: 0,
-          tokenId: tokenA?.id ?? 0,
+          tokenId: tokenA?.id ?? null,
+          discovery: "tracked",
+          tokenAAddress: tokenA?.address ?? null,
+          tokenASymbol: tokenA?.symbol ?? null,
+          liquidity: null,
+          custodianLabel: null,
           network,
           contractAddress,
           creatorAddress: result.creator,
@@ -106,6 +113,20 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
           blockNumber: result.blockNumber,
           detectedAt: new Date(),
         };
+        // No Token A given or tracked: read it from the contract the way
+        // auto-discovery does, and run the same liquidity test.
+        if (!tokenA) {
+          const auto = await analyzeAutoCandidate(network, contractAddress, input).catch(() => null);
+          if (auto?.kind === "candidate") {
+            const { alternateTokenA: _alt, tokenAGetter: _getter, ...autoFields } = auto.result;
+            record = {
+              ...record,
+              ...autoFields,
+              discovery: "auto",
+              liquidity: await checkLiquidityLevels(network, auto.result.tokenAAddress),
+            };
+          }
+        }
         await ctx.reply(formatMigrationAlert(tokenA, record, lang, { manual: true }), {
           parse_mode: "MarkdownV2",
           link_preview_options: { is_disabled: true },

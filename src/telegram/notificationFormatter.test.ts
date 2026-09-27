@@ -31,6 +31,13 @@ function migration(overrides: Partial<MigrationContractRecord> = {}): MigrationC
     txHash: "0xdead",
     blockNumber: 123n,
     detectedAt: new Date(),
+  discovery: "tracked",
+  tokenAAddress: null,
+  tokenASymbol: null,
+  tokenBSymbolUnverified: null,
+  rwaSignals: [],
+  liquidity: null,
+  custodianLabel: null,
     ...overrides,
   };
 }

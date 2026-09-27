@@ -20,6 +20,13 @@ const previous: MigrationContractRecord = {
   txHash: "0xdead",
   blockNumber: 1n,
   detectedAt: new Date(),
+  discovery: "tracked",
+  tokenAAddress: null,
+  tokenASymbol: null,
+  tokenBSymbolUnverified: null,
+  rwaSignals: [],
+  liquidity: null,
+  custodianLabel: null,
 };
 
 function next(overrides: Partial<MigrationAnalysisResult>): MigrationAnalysisResult {
@@ -33,6 +40,8 @@ function next(overrides: Partial<MigrationAnalysisResult>): MigrationAnalysisRes
     matchedFunctions: previous.matchedFunctions,
     matchedEvents: [],
     matchedAuxiliary: [],
+    tokenBSymbolUnverified: null,
+    rwaSignals: [],
     ...overrides,
   };
 }

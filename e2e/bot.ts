@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createPublicClient, createWalletClient, http, type Abi, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
+import { markdownV2Problem } from "./markdownV2.js";
 
 process.env.DATABASE_URL ??= "postgres://tracker:tracker@localhost:5432/migration_tracker";
 process.env.REDIS_URL ??= "redis://localhost:6379";
@@ -39,57 +40,6 @@ const calls: Call[] = [];
 type InjectedError = { error_code: number; description: string; parameters?: { retry_after: number } };
 const injected = new Map<number, InjectedError[]>();
 let nextMessageId = 1;
-
-/** Returns why Telegram would reject this MarkdownV2 text, or null. */
-function markdownV2Problem(text: string): string | null {
-  const reserved = "_*[]()~`>#+-=|{}.!";
-  const open: string[] = [];
-  const toggle = (token: string) => {
-    if (open.at(-1) === token) open.pop();
-    else if (open.includes(token)) throw new Error(`badly nested ${token}`);
-    else open.push(token);
-  };
-  try {
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i]!;
-      const context = () => JSON.stringify(text.slice(Math.max(0, i - 15), i + 15));
-      if (c === "\\") {
-        if (i + 1 >= text.length) return "trailing backslash";
-        i++;
-      } else if (c === "_" && text[i + 1] === "_") {
-        toggle("__");
-        i++;
-      } else if (c === "|" && text[i + 1] === "|") {
-        toggle("||");
-        i++;
-      } else if (c === "*" || c === "_" || c === "~") {
-        toggle(c);
-      } else if (c === "`") {
-        const end = text.indexOf("`", i + 1);
-        if (end < 0) return "unclosed code";
-        i = end;
-      } else if (c === "[") {
-        open.push("[");
-      } else if (c === "]") {
-        if (open.at(-1) !== "[") return `']' without '[' at ${context()}`;
-        open.pop();
-        if (text[i + 1] === "(") {
-          let j = i + 2;
-          while (j < text.length && text[j] !== ")") j += text[j] === "\\" ? 2 : 1;
-          if (j >= text.length) return "unclosed link url";
-          i = j;
-        }
-      } else if (c === ">" && (i === 0 || text[i - 1] === "\n")) {
-        // block quote
-      } else if (reserved.includes(c)) {
-        return `unescaped '${c}' at ${context()}`;
-      }
-    }
-  } catch (err) {
-    return (err as Error).message;
-  }
-  return open.length ? `unclosed ${open.join(" ")}` : null;
-}
 
 function rejectionReason(method: string, body: Record<string, unknown>): string | null {
   const text = typeof body.text === "string" ? body.text : undefined;
@@ -351,6 +301,26 @@ await click(CAROL, "settings:net:ALL");
 for (const n of ["anvil"]) await click(CAROL, `settings:net:${n}`);
 const carol = await chatSettingsRepository.get(String(CAROL));
 check("toggling a network off excludes it for that chat", Boolean(carol?.networksFilter && !carol.networksFilter.includes(NETWORK)), carol?.networksFilter);
+
+const settingsButtons = buttons(await send(ALICE, "/settings"));
+check("/settings has auto-discovery and liquidity-level buttons", ["settings:auto:on", "settings:auto:off", "settings:liq:STRICT", "settings:liq:LOW_CAP"].every((x) => settingsButtons.includes(x)), settingsButtons);
+await click(ALICE, "settings:liq:LOW_CAP");
+await click(ALICE, "settings:auto:off");
+let alice = await chatSettingsRepository.get(String(ALICE));
+check("Low-Cap and auto-off are saved for the chat", alice?.liquidityLevel === "LOW_CAP" && alice.autoAlerts === false, alice);
+await click(ALICE, "settings:auto:on");
+alice = await chatSettingsRepository.get(String(ALICE));
+check("auto alerts can be switched back on", alice?.autoAlerts === true, alice);
+
+section = "custodians";
+r = await send(ALICE, "/custodians");
+check("the custodian registry is admin-only", has(textsTo(r, ALICE), /лише адміністраторам/), textsTo(r, ALICE));
+r = await send(ADMIN, `/add_custodian anvil ${multisig.account.address} Backed Finance`);
+check("admin registers a custodian with a label", has(textsTo(r, ADMIN), /Backed Finance/), textsTo(r, ADMIN));
+r = await send(ADMIN, "/custodians");
+check("/custodians lists it", has(textsTo(r, ADMIN), new RegExp(`Backed Finance — anvil — ${multisig.account.address.toLowerCase()}`)), textsTo(r, ADMIN));
+r = await send(ADMIN, `/remove_custodian anvil ${multisig.account.address}`);
+check("/remove_custodian removes it", has(textsTo(r, ADMIN), /removed/), textsTo(r, ADMIN));
 
 // =====================================================================================
 section = "analyze/status";

@@ -39,7 +39,7 @@ const KNOWN_SIGNATURES = [
   "mkrToSky(address,uint256)", "mkr()", "sky()", "rate()",
   "migrate(uint256)", "unmigrate(uint256)", "matic()", "polygonEcosystemToken()", "initialize(address,address)",
   "redeem(uint256)", "issue(uint256)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
-  "owner()", "name()", "symbol()", "newToken()", "oldToken()",
+  "owner()", "name()", "symbol()", "newToken()", "oldToken()", "newTokenSymbol()",
 ];
 const signatureBySelector = new Map(KNOWN_SIGNATURES.map((sig) => [toFunctionSelector(sig), sig]));
 let signatureDbHits = 0;
@@ -138,7 +138,7 @@ startContractCreationWorker(async ({ token: tk, migrationContract: mc, update })
   }
   results.set(mc.contractAddress.toLowerCase(), {
     address: mc.contractAddress,
-    tokenA: tk.address,
+    tokenA: tk?.address ?? mc.tokenAAddress ?? "",
     getter: mc.matchedGetter,
     confidence: mc.confidence,
     score: mc.confidenceScore,
@@ -242,6 +242,9 @@ await run("Polygon-style: proxy, polygonEcosystemToken()", owner, "SimpleProxy",
   detected: true, confidence: "HIGH", tokenB: newToken.address, getter: "polygonEcosystemToken", attributedTo: oldToken.address,
 });
 await run("USDT-style token with redeem() (control)", owner, "UsdtStyleToken", [10n ** 24n], {
+  detected: true, confidence: "LOW", tokenB: null,
+});
+await run("Token B named only by ticker (newTokenSymbol) → LOW", owner, "SymbolOnlyMigrator", [oldToken.address], {
   detected: true, confidence: "LOW", tokenB: null,
 });
 

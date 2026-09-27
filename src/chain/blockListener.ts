@@ -1,10 +1,12 @@
-import type { Address } from "viem";
+import { getContractAddress, type Address } from "viem";
 import type { ContractCreationEvent, NetworkKey } from "../types/index.js";
 import { getPublicClient, networkHasWebSocket, resetWebSocketConnections } from "./provider.js";
 import { ownerRepository } from "../db/repositories/ownerRepository.js";
 import { networkCursorRepository } from "../db/repositories/networkCursorRepository.js";
 import { initListenerStatus, recordListenerError } from "./listenerStatus.js";
-import { findFactoryCreatedContracts } from "./traceCreateDetector.js";
+import { findBlockCreates, findFactoryCreatedContracts } from "./traceCreateDetector.js";
+import { custodianRepository } from "../db/repositories/custodianRepository.js";
+import { noteBlockSeen, noteCreationSeen } from "./autoStats.js";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
@@ -13,6 +15,13 @@ export interface TrackedContractCreationEvent extends ContractCreationEvent {
 }
 
 export type ContractCreationHandler = (event: TrackedContractCreationEvent) => void | Promise<void>;
+
+/** A contract created by a wallet nobody tracks — auto-discovery material. */
+export interface UntrackedContractCreationEvent extends ContractCreationEvent {
+  /** Set when the deployer is a registered RWA custodian. */
+  custodianLabel: string | null;
+}
+export type UntrackedCreationHandler = (event: UntrackedContractCreationEvent) => void | Promise<void>;
 
 const CURSOR_AHEAD_LIMIT = 64n;
 
@@ -84,7 +93,10 @@ function anyOwnersTracked(): Promise<boolean> {
 export function startBlockListener(
   network: NetworkKey,
   onContractCreation: ContractCreationHandler,
+  /** Contracts from untracked deployers (auto-discovery); omitted = tracked wallets only. */
+  onUntrackedCreation?: UntrackedCreationHandler,
 ): () => Promise<void> {
+  const handlers: Handlers = { tracked: onContractCreation, untracked: onUntrackedCreation };
   const client = getPublicClient(network);
   const usesWebSocket = networkHasWebSocket(network);
   const status = initListenerStatus(network, usesWebSocket ? "websocket" : "polling");
@@ -136,7 +148,7 @@ export function startBlockListener(
           logger.info({ network, blocks: (blockNumber - range.from + 1n).toString() }, "Catching up on missed blocks");
         }
         for (let bn = range.from; bn <= blockNumber && !stopped; bn++) {
-          const ok = await processBlockWithRetry(network, bn, onContractCreation);
+          const ok = await processBlockWithRetry(network, bn, handlers);
           if (!ok) status.failedBlocks++;
           lastProcessedBlock = bn;
           status.lastProcessedBlock = bn;
@@ -231,14 +243,15 @@ const BLOCK_RETRY_DELAYS_MS = [1_000, 3_000, 10_000];
 
 // A transient RPC/Redis failure must not silently drop a block's deployments,
 // so each block is retried with backoff before it's given up on.
-async function processBlockWithRetry(
-  network: NetworkKey,
-  blockNumber: bigint,
-  onContractCreation: ContractCreationHandler,
-): Promise<boolean> {
+interface Handlers {
+  tracked: ContractCreationHandler;
+  untracked: UntrackedCreationHandler | undefined;
+}
+
+async function processBlockWithRetry(network: NetworkKey, blockNumber: bigint, handlers: Handlers): Promise<boolean> {
   for (let attempt = 0; ; attempt++) {
     try {
-      await processBlock(network, blockNumber, onContractCreation);
+      await processBlock(network, blockNumber, handlers);
       return true;
     } catch (err) {
       const delay = BLOCK_RETRY_DELAYS_MS[attempt];
@@ -253,61 +266,72 @@ async function processBlockWithRetry(
   }
 }
 
-async function processBlock(network: NetworkKey, blockNumber: bigint, onContractCreation: ContractCreationHandler) {
-  if (!(await anyOwnersTracked())) return;
+async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: Handlers) {
+  const autoDiscovery = handlers.untracked !== undefined;
+  if (!autoDiscovery && !(await anyOwnersTracked())) return;
   const client = getPublicClient(network);
   const block = await client.getBlock({ blockNumber, includeTransactions: true });
 
   const txs = block.transactions.filter((tx): tx is Exclude<typeof tx, string> => typeof tx === "object");
   if (txs.length === 0) return;
+  noteBlockSeen(network);
 
   const uniqueSenders = [...new Set(txs.map((tx) => tx.from as Address))];
   const ownerMap = await ownerRepository.findTokenIdsForAddresses(uniqueSenders);
-  if (ownerMap.size === 0) return;
+  if (!autoDiscovery && ownerMap.size === 0) return;
+  const senderOf = new Map(txs.map((tx) => [tx.hash, tx.from as Address]));
+
+  // With auto-discovery on, one trace of the whole block yields every
+  // contract created in it, factory-made ones included.
+  const traced = autoDiscovery && env.ENABLE_FACTORY_TRACE_DETECTION ? await findBlockCreates(client, network, blockNumber) : null;
+  const seen = new Set<string>();
+
+  const dispatch = async (contractAddress: Address, creator: Address, txHash: `0x${string}`, input: `0x${string}`, via?: string) => {
+    const key = contractAddress.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const event = { network, contractAddress, creatorAddress: creator, txHash, blockNumber, input };
+    const tokenIds = ownerMap.get(creator.toLowerCase());
+    if (tokenIds && tokenIds.length > 0) {
+      logger.info({ network, contractAddress, creator, via, tokenIds }, "Tracked owner deployed a new contract");
+      await handlers.tracked({ ...event, tokenIds });
+      return;
+    }
+    if (!handlers.untracked) return;
+    noteCreationSeen(network);
+    await handlers.untracked({ ...event, custodianLabel: await custodianRepository.labelFor(network, creator) });
+  };
+
+  if (traced) {
+    for (const create of traced) {
+      const creator = senderOf.get(create.txHash);
+      if (creator) await dispatch(create.address, creator, create.txHash, create.input, "trace");
+    }
+  }
 
   for (const tx of txs) {
     const tokenIds = ownerMap.get((tx.from as string).toLowerCase());
-    if (!tokenIds || tokenIds.length === 0) continue;
+    const tracked = tokenIds !== undefined && tokenIds.length > 0;
 
     if (tx.to === null) {
-      const receipt = await client.getTransactionReceipt({ hash: tx.hash });
-      if (!receipt.contractAddress) continue;
-
-      logger.info(
-        { network, contractAddress: receipt.contractAddress, creator: tx.from, tokenIds },
-        "Tracked owner deployed a new contract",
-      );
-
-      await onContractCreation({
-        network,
-        contractAddress: receipt.contractAddress,
-        creatorAddress: tx.from as Address,
-        txHash: tx.hash,
-        blockNumber,
-        input: tx.input,
-        tokenIds,
-      });
+      if (traced) continue; // the block trace already listed it
+      if (tracked) {
+        // Tracked deployers: confirm with the receipt (a reverted deploy creates nothing).
+        const receipt = await client.getTransactionReceipt({ hash: tx.hash });
+        if (receipt.contractAddress) await dispatch(receipt.contractAddress, tx.from as Address, tx.hash, tx.input);
+      } else if (handlers.untracked) {
+        // Everyone else: derive the address from sender + nonce — no extra
+        // RPC call per deployment; a reverted one just has no code later.
+        const address = getContractAddress({ from: tx.from as Address, nonce: BigInt(tx.nonce) });
+        await dispatch(address, tx.from as Address, tx.hash, tx.input);
+      }
       continue;
     }
 
-    if (!env.ENABLE_FACTORY_TRACE_DETECTION) continue;
-
+    // A tracked wallet calling a factory: trace that transaction (unless the
+    // whole block was already traced above).
+    if (!tracked || traced || !env.ENABLE_FACTORY_TRACE_DETECTION) continue;
     const created = await findFactoryCreatedContracts(client, network, tx.hash);
-    for (const { address: contractAddress, input } of created) {
-      logger.info(
-        { network, contractAddress, creator: tx.from, via: tx.to, tokenIds },
-        "Tracked owner deployed a new contract via a factory",
-      );
-
-      await onContractCreation({
-        network,
-        contractAddress,
-        creatorAddress: tx.from as Address,
-        txHash: tx.hash,
-        blockNumber,
-        input,
-        tokenIds,
-      });
-    }
+    for (const { address, input } of created) await dispatch(address, tx.from as Address, tx.hash, input, "factory");
   }
 }

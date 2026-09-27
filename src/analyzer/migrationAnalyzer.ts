@@ -1,4 +1,4 @@
-import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
+import { toFunctionSelector, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
 import type { ConfidenceLevel, MigrationAnalysisResult, NetworkKey, TokenBSource } from "../types/index.js";
 import { getPublicClient } from "../chain/provider.js";
 import { migrationFunctionSelectors } from "./functionSelectors.js";
@@ -11,6 +11,7 @@ import { lookupFunctionSignatures } from "./signatureLookup.js";
 import { classifyFunctionSignature } from "./functionClassifier.js";
 import { probeZeroArgTokenGetters } from "./genericTokenProbe.js";
 import { pickReferencedToken } from "./pickToken.js";
+import { findRwaSignals, findSymbolOnlyTokenB } from "./tokenSignals.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -63,6 +64,7 @@ export function computeConfidenceScore(confidence: ConfidenceLevel, input: Score
   let evidence = 0;
 
   if (input.tokenBSource === "static_call") evidence += 45;
+  else if (input.tokenBSource === "contract_itself") evidence += 40;
   else if (input.tokenBSource === "constructor_args") evidence += 35;
   else if (input.tokenBSource === "token_a_match") evidence += 20;
 
@@ -79,13 +81,28 @@ const ERC20_CORE = ["totalSupply()", "balanceOf(address)", "transfer(address,uin
   toFunctionSelector(s),
 );
 
-export async function analyzeMigrationContract(
-  network: NetworkKey,
-  contractAddress: Address,
-  creationInput: `0x${string}` | string,
-  /** Tracked tokens this deployment could belong to, best guess first (e.g. same network). */
-  tokenACandidates: Address[],
-): Promise<MigrationAnalysisResult> {
+export interface ContractInspection {
+  client: PublicClient;
+  proxyCode: Hex | undefined;
+  implementationCode: Hex | undefined;
+  /** Proxy + implementation code, scanned together. */
+  bytecode: string;
+  selectors: Hex[];
+  /** Selector → text signature, from the signature database. */
+  signatures: Map<string, string>;
+  /** The contract is itself an ERC-20 (totalSupply/balanceOf/transfer). */
+  isToken: boolean;
+  strong: string[];
+  weak: string[];
+  matchedEvents: string[];
+}
+
+/**
+ * Reads what a contract is made of: its code (following proxies to the
+ * implementation), its dispatcher's functions and their names, and which of
+ * them / which events look like migration logic.
+ */
+export async function inspectContract(network: NetworkKey, contractAddress: Address): Promise<ContractInspection> {
   const client = getPublicClient(network);
 
   const proxyCode = await client.getCode({ address: contractAddress });
@@ -99,14 +116,6 @@ export async function analyzeMigrationContract(
   // Scan the proxy and its implementation together: for a proxied migrator,
   // migrate()/Migrated live only in the implementation's bytecode.
   const bytecode = (proxyCode ?? "") + (implementationCode?.slice(2) ?? "");
-
-  // Token A is the candidate the contract references — in its deploy input,
-  // or (for a proxy) inlined as an immutable in the implementation's code.
-  const tokenAAddress =
-    pickReferencedToken(
-      tokenACandidates.map((address) => ({ address })),
-      [creationInput, proxyCode ?? "", implementationCode ?? ""],
-    )?.address ?? zeroAddress;
 
   const selectors: Hex[] = [
     ...new Set([
@@ -133,10 +142,32 @@ export async function analyzeMigrationContract(
     if (strength === "strong") strong.push(signature);
     else if (strength === "weak") weak.push(signature);
   }
+  const matchedEvents = bytecode ? scanBytecodeForMigrationEvents(bytecode) : [];
+
+  return { client, proxyCode, implementationCode, bytecode, selectors, signatures, isToken, strong, weak, matchedEvents };
+}
+
+export async function analyzeMigrationContract(
+  network: NetworkKey,
+  contractAddress: Address,
+  creationInput: `0x${string}` | string,
+  /** Tracked tokens this deployment could belong to, best guess first (e.g. same network). */
+  tokenACandidates: Address[],
+): Promise<MigrationAnalysisResult> {
+  const { client, proxyCode, implementationCode, selectors, signatures, isToken, strong, weak, matchedEvents } =
+    await inspectContract(network, contractAddress);
+
+  // Token A is the candidate the contract references — in its deploy input,
+  // or (for a proxy) inlined as an immutable in the implementation's code.
+  const tokenAAddress =
+    pickReferencedToken(
+      tokenACandidates.map((address) => ({ address })),
+      [creationInput, proxyCode ?? "", implementationCode ?? ""],
+    )?.address ?? zeroAddress;
+
   // Weak names on an ERC-20 (e.g. USDT's redeem) are noise — not shown, not counted.
   const countedWeak = isToken ? [] : weak;
   const matchedFunctions = [...strong, ...countedWeak];
-  const matchedEvents = bytecode ? scanBytecodeForMigrationEvents(bytecode) : [];
 
   const matchedAuxiliary = await probeAuxiliarySignals(client, contractAddress).catch((err) => {
     logger.warn({ err, network, contractAddress }, "Auxiliary signal probe failed");
@@ -185,8 +216,16 @@ export async function analyzeMigrationContract(
     }
   }
 
+  // Token B named only by a ticker is not a token signal: tickers collide
+  // across networks, so it is shown as Unverified and the alert stays LOW.
+  const symbolOnly = tokenBAddress
+    ? null
+    : await findSymbolOnlyTokenB(client, contractAddress, signatures).catch(() => null);
+
   const hasTokenSignal = tokenBAddress !== null || tokenBSource === "token_a_match";
-  const confidence = computeConfidence(hasFunctionSignal(strong.length, weak.length, isToken), hasTokenSignal);
+  const confidence = symbolOnly
+    ? "LOW"
+    : computeConfidence(hasFunctionSignal(strong.length, weak.length, isToken), hasTokenSignal);
   const confidenceScore = computeConfidenceScore(confidence, {
     tokenBSource,
     strongFunctionCount: strong.length,
@@ -205,5 +244,7 @@ export async function analyzeMigrationContract(
     matchedFunctions,
     matchedEvents,
     matchedAuxiliary,
+    tokenBSymbolUnverified: symbolOnly?.symbol ?? null,
+    rwaSignals: findRwaSignals(selectors),
   };
 }

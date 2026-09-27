@@ -1,6 +1,7 @@
 import { pool } from "../client.js";
 import type {
   ConfidenceLevel,
+  DiscoveryKind,
   MigrationAnalysisResult,
   MigrationContractRecord,
   NetworkKey,
@@ -9,7 +10,14 @@ import type {
 
 interface MigrationContractRow {
   id: number;
-  token_id: number;
+  token_id: number | null;
+  discovery: string;
+  token_a_address: string | null;
+  token_a_symbol: string | null;
+  token_b_symbol_unverified: string | null;
+  rwa_signals: string[];
+  liquidity: MigrationContractRecord["liquidity"];
+  custodian_label: string | null;
   network: string;
   contract_address: string;
   creator_address: string;
@@ -30,6 +38,13 @@ function toRecord(row: MigrationContractRow): MigrationContractRecord {
   return {
     id: row.id,
     tokenId: row.token_id,
+    discovery: row.discovery as DiscoveryKind,
+    tokenAAddress: row.token_a_address as `0x${string}` | null,
+    tokenASymbol: row.token_a_symbol,
+    tokenBSymbolUnverified: row.token_b_symbol_unverified,
+    rwaSignals: row.rwa_signals ?? [],
+    liquidity: row.liquidity ?? null,
+    custodianLabel: row.custodian_label,
     network: row.network as NetworkKey,
     contractAddress: row.contract_address as `0x${string}`,
     creatorAddress: row.creator_address as `0x${string}`,
@@ -49,7 +64,14 @@ function toRecord(row: MigrationContractRow): MigrationContractRecord {
 
 export const migrationContractRepository = {
   async create(input: {
-    tokenId: number;
+    tokenId: number | null;
+    discovery?: DiscoveryKind;
+    tokenAAddress?: `0x${string}` | null;
+    tokenASymbol?: string | null;
+    tokenBSymbolUnverified?: string | null;
+    rwaSignals?: string[];
+    liquidity?: MigrationContractRecord["liquidity"];
+    custodianLabel?: string | null;
     network: NetworkKey;
     contractAddress: `0x${string}`;
     creatorAddress: `0x${string}`;
@@ -67,8 +89,10 @@ export const migrationContractRepository = {
     const { rows } = await pool.query<MigrationContractRow>(
       `INSERT INTO migration_contracts
          (token_id, network, contract_address, creator_address, token_b_address, confidence, confidence_score,
-          matched_functions, matched_events, matched_auxiliary, token_b_source, matched_getter, tx_hash, block_number)
-       VALUES ($1, $2, lower($3), lower($4), lower($5), $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          matched_functions, matched_events, matched_auxiliary, token_b_source, matched_getter, tx_hash, block_number,
+          discovery, token_a_address, token_a_symbol, token_b_symbol_unverified, rwa_signals, liquidity, custodian_label)
+       VALUES ($1, $2, lower($3), lower($4), lower($5), $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               $15, lower($16), $17, $18, $19, $20, $21)
        ON CONFLICT (network, contract_address) DO NOTHING
        RETURNING *`,
       [
@@ -86,6 +110,13 @@ export const migrationContractRepository = {
         input.matchedGetter,
         input.txHash,
         input.blockNumber.toString(),
+        input.discovery ?? "tracked",
+        input.tokenAAddress ?? null,
+        input.tokenASymbol ?? null,
+        input.tokenBSymbolUnverified ?? null,
+        input.rwaSignals ?? [],
+        input.liquidity ? JSON.stringify(input.liquidity) : null,
+        input.custodianLabel ?? null,
       ],
     );
     return rows[0] ? toRecord(rows[0]) : null;
@@ -120,12 +151,15 @@ export const migrationContractRepository = {
       | "matchedAuxiliary"
       | "tokenBSource"
       | "matchedGetter"
+      | "tokenBSymbolUnverified"
+      | "rwaSignals"
     >,
   ): Promise<MigrationContractRecord | null> {
     const { rows } = await pool.query<MigrationContractRow>(
       `UPDATE migration_contracts
           SET token_b_address = lower($2), confidence = $3, confidence_score = $4, matched_functions = $5,
-              matched_events = $6, matched_auxiliary = $7, token_b_source = $8, matched_getter = $9
+              matched_events = $6, matched_auxiliary = $7, token_b_source = $8, matched_getter = $9,
+              token_b_symbol_unverified = $10, rwa_signals = $11
         WHERE id = $1
         RETURNING *`,
       [
@@ -138,6 +172,8 @@ export const migrationContractRepository = {
         analysis.matchedAuxiliary,
         analysis.tokenBSource,
         analysis.matchedGetter,
+        analysis.tokenBSymbolUnverified,
+        analysis.rwaSignals,
       ],
     );
     return rows[0] ? toRecord(rows[0]) : null;

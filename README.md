@@ -1,8 +1,10 @@
 # Multi-EVM Token Migration Tracker
 
-Real-time monitor for EVM networks that watches known token owners/admins
-for new contract deployments, classifies whether a new contract looks like a
-migration mechanism into a second token, and pushes alert cards to Telegram.
+Real-time monitor for EVM networks that scans every newly created contract
+for token-migration mechanisms (auto-discovery), keeps only those whose old
+token has a real DEX market (OKX executable-route test), and pushes alert
+cards to Telegram. Wallets of projects added with `/add_token` get priority
+alerts on top of that.
 
 Implements the architecture from the project spec:
 
@@ -110,6 +112,22 @@ npm run dev                # or: npm run build && npm start
   how often every tracked token's owners are re-discovered. Newly found
   wallets (e.g. ownership moved to a multisig) are linked automatically and
   the chat that added the token is told. Old wallets are kept.
+- `AUTO_DISCOVERY` — optional (default `true`); scan every new contract, not
+  only tracked wallets'. `AUTO_DISCOVERY_NETWORKS` limits it to some networks
+  (comma-separated; empty = all enabled ones) — it reads and traces every
+  block, the costliest part in RPC quota. `AUTO_CONCURRENCY` (default `8`)
+  parallel analyses.
+- `OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_API_PASSPHRASE` (+ optional
+  `OKX_PROJECT_ID`) — OKX Web3 / DEX API credentials for the liquidity test.
+  `AUTO_REQUIRE_LIQUIDITY=false` sends auto alerts even when the test
+  couldn't run (not recommended: that's what filters the spam).
+- `QUOTE_TOKEN_<NETWORK>` — optional override of the stablecoin the test
+  swaps from, `<address>:<decimals>[:<symbol>]` (defaults: USDT, or USDC /
+  USDB / USDT0 where that's the chain's main dollar).
+  `BASE_ASSETS_<NETWORK>` — extra comma-separated addresses never treated as
+  a migration's Token A (wrapped native and major stables are built in).
+- `CUSTODIAN_DEPLOYERS` — optional seed of the RWA custodian registry,
+  `network:0xaddress:Label,...`.
 - `ADMIN_CHAT_IDS` — comma-separated Telegram numeric chat/user IDs (not
   `@usernames`) that are administrators. Required for anyone other than the
   admins themselves to ever use the bot — see "Access control" below.
@@ -133,6 +151,58 @@ All bot text — commands, errors, the settings UI, and the alert card itself
 fourth language there (and to the `Language` type in `src/types/index.ts`)
 if you need one.
 
+## Auto-discovery (all new contracts)
+
+With `AUTO_DISCOVERY=true` (the default) the bot doesn't need `/add_token` to
+find migrations. For every block on every enabled network:
+
+1. **Every contract created** is collected: direct deployments (address from
+   sender + nonce, no extra RPC call) and factory `CREATE`/`CREATE2`
+   deployments from one whole-block trace — `debug_traceBlockByNumber`
+   (Geth-style) or `trace_block` (Erigon/Parity-style), whichever the RPC
+   offers. If neither works the network is paused for tracing for 6h and
+   `/status` says so; direct deployments are still covered.
+2. **Signature gate** — kept only if the dispatcher has a migration-style
+   function (`migrate*`, `convert*`, `swap*`, `xToY`) or an `oldToken()`-style
+   getter. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
+   ERC-20s whose only "swap" is fee plumbing (`swapTokensForEth`), contracts
+   that reference no other token.
+3. **Token A / Token B by address only** — every ERC-20 the contract returns
+   from zero-argument getters or takes in its constructor. Old vs new is
+   decided from names (`oldToken`/`newToken`, `migrateFromLEND` → `LEND()`,
+   `mkrToSky` → `mkr()`/`sky()`); a token with `migrate()` is itself Token B;
+   when names don't tell, the token with a market is Token A. Wrapped native
+   and stablecoins are never Token A. Symbols are only displayed — never
+   matched — so same-ticker tokens on other chains can't be confused. A
+   target given only as a ticker (e.g. `newTokenSymbol()`) is shown as
+   **Unverified** and the alert is LOW.
+4. **Liquidity test (OKX DEX aggregator, `GET /api/v6/dex/aggregator/quote`)**
+   — a quote for $300 then $1,000 of the network's dollar stablecoin into
+   Token A. PASS = `code == 0`, a route, and price impact within the chat's
+   level: **Strict** ($1,000 / ≤ 5%, default) or **Low-Cap** ($300 / ≤ 10%),
+   chosen per chat in `/settings`. No route / too much impact / honeypot =
+   dropped. Results are cached per token for 5 minutes; an OKX outage is
+   retried rather than cached.
+5. **Alert** to every approved chat that has auto alerts on and whose level
+   the token passes. The card shows the source (auto-discovery), Token A's
+   full address, and the test swaps (`$1,000 → 0.80% ✅ · $300 → 0.20% ✅`).
+
+**RWA / tokenized stocks.** `isin()`, `cusip()`, `underlyingAsset()` and
+`issuer()` getters are recognised and shown on the card. Deployers of
+tokenized stocks (Backed Finance, Dinari, Robinhood...) can be registered as
+custodians with `/add_custodian` (or `CUSTODIAN_DEPLOYERS`); their
+migration-style deployments are alerted without the DEX test, since
+tokenized stocks don't trade on DEXes at launch. No addresses are
+pre-seeded — add the verified deployer addresses (e.g. the one labelled
+"Robinhood: Deployer" on Arbiscan).
+
+**Infrastructure.** Auto-discovery reads every block in full and traces it,
+so it needs WebSocket RPCs with plenty of throughput (the spec asks for
+50–100 RPS per network via QuickNode, Chainstack or Alchemy) and an endpoint
+that supports `debug_traceBlockByNumber` or `trace_block`. Without OKX keys
+auto-discovered alerts are held back (`/status` shows this); tracked
+projects' alerts are unaffected.
+
 ## Bot commands
 
 ```
@@ -144,7 +214,8 @@ if you need one.
 /settings                                         Inline-keyboard toggles for confidence + network filters
 /language                                         Change the bot's language
 /analyze <network> <deploy_tx_hash> [token_a]     Analyze any already-deployed contract on demand
-/status                                           Admins only: per-network health, lag, errors, queue
+/status                                           Admins only: per-network health, lag, errors, queue, auto-discovery, OKX
+/custodians, /add_custodian, /remove_custodian    Admins only: RWA deployer registry
 ```
 
 `/status` shows, per enabled network: 🟢/🟡/🔴 (last block processed under
@@ -254,6 +325,21 @@ negative chat ids); a chat that blocked the bot (403) and flood control
 (429, waited out and retried); `/list` for a token with 60+ wallets staying
 under the length limit; and that no message has an unfilled placeholder or
 raw translation key.
+
+### Auto-discovery test
+
+`npm run test:auto` runs the auto-discovery pipeline with a stub of the OKX
+DEX API and checks: alerts from untracked deployers without `/add_token`;
+a same-ticker token of another project not being attributed to the tracked
+one; tracked owners still taking the priority path; no-route Token A
+dropped; Aave-style direction from `migrateFromLEND`; constructor-only
+tokens ordered by which has a market; a token that is its own Token B;
+ticker-only target → LOW + Unverified; DEX pairs, fee-swap meme tokens,
+WETH "migrations" and plain contracts ignored; Strict vs Low-Cap routing;
+OKX outage retried; RWA custodian deployments alerted without a DEX market
+(and the same contract from anyone else not); a `CREATE2` child found via
+`trace_block`; per-token caching of OKX quotes; deploy → alert ≤ 10s; and
+every card valid MarkdownV2 in all three languages.
 
 ### Resilience test
 

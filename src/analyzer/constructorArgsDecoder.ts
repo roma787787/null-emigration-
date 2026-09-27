@@ -36,10 +36,14 @@ export function extractAddressCandidatesFromConstructorArgs(input: `0x${string}`
   return candidates;
 }
 
+// Words below 2^32 are numbers (amounts, rates, flags), not addresses — and
+// small ones would point at precompiles that answer any call.
+const MIN_ADDRESS_VALUE = 2n ** 32n;
+
 function isAddressShapedWord(word: string): boolean {
   const leadingZeros = word.slice(0, 24);
   const addressPart = word.slice(24);
-  return /^0+$/.test(leadingZeros) && /^[0-9a-f]{40}$/.test(addressPart) && !/^0+$/.test(addressPart);
+  return /^0+$/.test(leadingZeros) && /^[0-9a-f]{40}$/.test(addressPart) && BigInt(`0x${addressPart}`) >= MIN_ADDRESS_VALUE;
 }
 
 const ERC20_PROBE_ABI = [

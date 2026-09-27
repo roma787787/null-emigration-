@@ -75,3 +75,28 @@ CREATE TABLE IF NOT EXISTS network_cursors (
     last_block BIGINT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Auto-discovery: a detection may belong to no tracked token at all; its
+-- Token A then comes from the contract itself (by address, never by ticker).
+ALTER TABLE migration_contracts ALTER COLUMN token_id DROP NOT NULL;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS discovery TEXT NOT NULL DEFAULT 'tracked';
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS token_a_address TEXT;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS token_a_symbol TEXT;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS token_b_symbol_unverified TEXT;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS rwa_signals TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS liquidity JSONB;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS custodian_label TEXT;
+
+-- Per chat: liquidity test level for auto-discovered alerts, and whether to get them at all.
+ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS liquidity_level TEXT NOT NULL DEFAULT 'STRICT';
+ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS auto_alerts BOOLEAN NOT NULL DEFAULT true;
+
+-- Known deployers of tokenized stocks / RWA (Backed, Dinari, Robinhood...):
+-- their deployments are always analyzed and skip the DEX-liquidity filter.
+CREATE TABLE IF NOT EXISTS custodians (
+    network    TEXT NOT NULL,
+    address    TEXT NOT NULL,
+    label      TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (network, address)
+);

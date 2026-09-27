@@ -17,10 +17,10 @@ const en: Dict = {
   welcome:
     "🛰 Multi-EVM Migration Tracker\n" +
     "\n" +
-    "Watches token owners/admins across EVM networks for new contract deployments, and flags the ones that look like a migration into a new token.\n" +
+    "Scans every new contract on 12 EVM networks for token-migration mechanisms (auto-discovery), keeps only those whose old token has a real DEX market (OKX executable-route test), and alerts here. Tracked projects' wallets get priority alerts.\n" +
     "\n" +
     "Commands:\n" +
-    "/add_token <network> <address> — track a token, auto-discover its owners\n" +
+    "/add_token <network> <address> — priority tracking: watch this token's owner/dev wallets\n" +
     "/list — tracked tokens and their owners (paginated)\n" +
     "/remove_token <address> — stop tracking a token (asks to confirm)\n" +
     "/add_owner <network> <token> <owner> — manually link an extra wallet (dev, multisig) to a tracked token\n" +
@@ -29,6 +29,7 @@ const en: Dict = {
     "/settings — toggle which confidence level / networks alert this chat\n" +
     "/language — change the bot's language\n" +
     "/status — bot health per network (admins only)\n" +
+    "/custodians, /add_custodian, /remove_custodian — RWA deployer registry (admins only)\n" +
     "/help — show this message again",
 
   "approval.pending": "🔒 Your access request has been sent to the administrator. You'll get a message here once it's approved.",
@@ -97,6 +98,14 @@ const en: Dict = {
   "settings.buttonAllNetworks": "All networks",
   "settings.cbConfidenceSet": "Confidence: {filter}",
   "settings.cbUnknownNetwork": "Unknown network",
+  "settings.autoLabel": "Auto-discovery alerts (all new contracts): {state}",
+  "settings.liquidityLabel": "Liquidity test for auto alerts: {level}",
+  "settings.on": "on",
+  "settings.off": "off",
+  "settings.buttonAutoOn": "Auto-discovery on",
+  "settings.buttonAutoOff": "Tracked tokens only",
+  "settings.levelStrict": "Strict ($1,000 / 5%)",
+  "settings.levelLowCap": "Low-Cap ($300 / 10%)",
 
   "card.title": "MIGRATION CONTRACT DETECTED",
   "card.titleManual": "CONTRACT ANALYSIS",
@@ -123,6 +132,25 @@ const en: Dict = {
   "card.eventWord": "Event",
   "card.variableWord": "variable",
   "card.noSignals": "no explicit signals found",
+  "card.sourceAuto": "Auto-discovery: found in a scan of all new contracts",
+  "card.sourceCustodian": "Deployed by RWA custodian {label}",
+  "card.sourceSelf": "the contract itself (it is the new token)",
+  "card.unverifiedNote": "ticker only, no contract address — not matched to any token",
+  "card.liquidity": "Liquidity (OKX)",
+  "card.liquidityUnchecked": "not checked: {reason}",
+  "custodians.header": "RWA custodians (their deployments skip the DEX liquidity filter):",
+  "custodians.empty": "No RWA custodians registered. Add one: /add_custodian <network> <deployer_address> <label>",
+  "custodians.addUsage": "Usage: /add_custodian <network> <deployer_address> <label>\nNetworks: {networks}",
+  "custodians.removeUsage": "Usage: /remove_custodian <network> <deployer_address>",
+  "custodians.added": "✅ {label} ({network}, {address}) registered as an RWA custodian.",
+  "custodians.removed": "🗑 {address} removed from RWA custodians.",
+  "custodians.notFound": "{address} is not a registered custodian on that network.",
+  "status.auto": "🛰 Auto-discovery: new contracts {creations} · migration candidates {candidates} · dropped by liquidity {liquidity} · alerts {alerts} · queued {waiting}",
+  "status.autoOff": "🛰 Auto-discovery: off (AUTO_DISCOVERY=false)",
+  "status.okxOn": "💧 OKX liquidity API: configured",
+  "status.okxOff": "💧 OKX liquidity API: NOT configured — auto-discovered alerts are held back until OKX_API_KEY / OKX_SECRET_KEY / OKX_API_PASSPHRASE are set",
+  "status.blockTrace": "block trace: {state}",
+  "status.traceUntested": "not tried yet",
   "card.links": "Links:",
 
   "owners.more": "… and {count} more",
@@ -158,10 +186,10 @@ const uk: Dict = {
   welcome:
     "🛰 Multi-EVM Migration Tracker\n" +
     "\n" +
-    "Стежить за власниками/адмінами токенів у EVM-мережах, шукає нові задеплоєні контракти та позначає ті, що схожі на механізм міграції в новий токен.\n" +
+    "Сканує всі нові контракти в 12 EVM-мережах у пошуках механізмів міграції токенів (автопошук), залишає лише ті, де старий токен має реальний DEX-ринок (перевірка маршруту через OKX), і надсилає алерти сюди. Гаманці відстежуваних проєктів — пріоритетні алерти.\n" +
     "\n" +
     "Команди:\n" +
-    "/add_token <мережа> <адреса> — почати відстежувати токен, авто-пошук власників\n" +
+    "/add_token <мережа> <адреса> — пріоритетне стеження за гаманцями власника/розробників токена\n" +
     "/list — список відстежуваних токенів та їх власників (з пагінацією)\n" +
     "/remove_token <адреса> — прибрати токен з відстеження (з підтвердженням)\n" +
     "/add_owner <мережа> <токен> <власник> — вручну прив'язати гаманець (розробник, мультисиг) до токена\n" +
@@ -170,6 +198,7 @@ const uk: Dict = {
     "/settings — перемкнути рівень впевненості / мережі для алертів у цьому чаті\n" +
     "/language — змінити мову бота\n" +
     "/status — стан бота по мережах (лише для адмінів)\n" +
+    "/custodians, /add_custodian, /remove_custodian — реєстр RWA-деплоєрів (лише для адмінів)\n" +
     "/help — показати це повідомлення знову",
 
   "approval.pending": "🔒 Запит на доступ надіслано адміністратору. Ви отримаєте повідомлення тут, коли його схвалять.",
@@ -239,6 +268,14 @@ const uk: Dict = {
   "settings.buttonAllNetworks": "Усі мережі",
   "settings.cbConfidenceSet": "Впевненість: {filter}",
   "settings.cbUnknownNetwork": "Невідома мережа",
+  "settings.autoLabel": "Алерти автопошуку (усі нові контракти): {state}",
+  "settings.liquidityLabel": "Тест ліквідності для автоалертів: {level}",
+  "settings.on": "увімк.",
+  "settings.off": "вимк.",
+  "settings.buttonAutoOn": "Автопошук увімк.",
+  "settings.buttonAutoOff": "Лише мої токени",
+  "settings.levelStrict": "Strict ($1,000 / 5%)",
+  "settings.levelLowCap": "Low-Cap ($300 / 10%)",
 
   "card.title": "ВИЯВЛЕНО КОНТРАКТ МІГРАЦІЇ",
   "card.titleManual": "АНАЛІЗ КОНТРАКТУ",
@@ -265,6 +302,25 @@ const uk: Dict = {
   "card.eventWord": "Подія",
   "card.variableWord": "змінна",
   "card.noSignals": "явних ознак не знайдено",
+  "card.sourceAuto": "Автопошук: знайдено при скануванні всіх нових контрактів",
+  "card.sourceCustodian": "Задеплоєно RWA-кастодіаном {label}",
+  "card.sourceSelf": "сам контракт (це і є новий токен)",
+  "card.unverifiedNote": "лише тикер, без адреси контракту — ні з яким токеном не зіставлено",
+  "card.liquidity": "Ліквідність (OKX)",
+  "card.liquidityUnchecked": "не перевірено: {reason}",
+  "custodians.header": "RWA-кастодіани (їхні деплої не проходять DEX-фільтр ліквідності):",
+  "custodians.empty": "RWA-кастодіанів ще немає. Додати: /add_custodian <мережа> <адреса_деплоєра> <назва>",
+  "custodians.addUsage": "Використання: /add_custodian <мережа> <адреса_деплоєра> <назва>\nМережі: {networks}",
+  "custodians.removeUsage": "Використання: /remove_custodian <мережа> <адреса_деплоєра>",
+  "custodians.added": "✅ {label} ({network}, {address}) додано як RWA-кастодіана.",
+  "custodians.removed": "🗑 {address} прибрано з RWA-кастодіанів.",
+  "custodians.notFound": "{address} не зареєстрований як кастодіан у цій мережі.",
+  "status.auto": "🛰 Автопошук: нових контрактів {creations} · кандидатів у міграції {candidates} · відсіяно за ліквідністю {liquidity} · алертів {alerts} · у черзі {waiting}",
+  "status.autoOff": "🛰 Автопошук: вимк. (AUTO_DISCOVERY=false)",
+  "status.okxOn": "💧 OKX API ліквідності: налаштовано",
+  "status.okxOff": "💧 OKX API ліквідності: НЕ налаштовано — алерти автопошуку затримуються, доки не задано OKX_API_KEY / OKX_SECRET_KEY / OKX_API_PASSPHRASE",
+  "status.blockTrace": "трасування блоків: {state}",
+  "status.traceUntested": "ще не перевірялось",
   "card.links": "Посилання:",
 
   "owners.more": "… і ще {count}",
@@ -300,10 +356,10 @@ const ru: Dict = {
   welcome:
     "🛰 Multi-EVM Migration Tracker\n" +
     "\n" +
-    "Отслеживает владельцев/админов токенов в EVM-сетях, следит за новыми задеплоенными контрактами и помечает те, что похожи на механизм миграции в новый токен.\n" +
+    "Сканирует все новые контракты в 12 EVM-сетях в поисках механизмов миграции токенов (автопоиск), оставляет только те, где у старого токена есть реальный DEX-рынок (проверка маршрута через OKX), и присылает алерты сюда. Кошельки отслеживаемых проектов — приоритетные алерты.\n" +
     "\n" +
     "Команды:\n" +
-    "/add_token <сеть> <адрес> — начать отслеживать токен, авто-поиск владельцев\n" +
+    "/add_token <сеть> <адрес> — приоритетное слежение за кошельками владельца/разработчиков токена\n" +
     "/list — список отслеживаемых токенов и их владельцев (с пагинацией)\n" +
     "/remove_token <адрес> — убрать токен из отслеживания (с подтверждением)\n" +
     "/add_owner <сеть> <токен> <владелец> — вручную привязать кошелёк (разработчик, мультисиг) к токену\n" +
@@ -312,6 +368,7 @@ const ru: Dict = {
     "/settings — переключить уровень уверенности / сети для алертов в этом чате\n" +
     "/language — сменить язык бота\n" +
     "/status — состояние бота по сетям (только для админов)\n" +
+    "/custodians, /add_custodian, /remove_custodian — реестр RWA-деплоеров (только для админов)\n" +
     "/help — показать это сообщение снова",
 
   "approval.pending": "🔒 Запрос на доступ отправлен администратору. Вы получите сообщение здесь, когда его одобрят.",
@@ -381,6 +438,14 @@ const ru: Dict = {
   "settings.buttonAllNetworks": "Все сети",
   "settings.cbConfidenceSet": "Уверенность: {filter}",
   "settings.cbUnknownNetwork": "Неизвестная сеть",
+  "settings.autoLabel": "Алерты автопоиска (все новые контракты): {state}",
+  "settings.liquidityLabel": "Тест ликвидности для автоалертов: {level}",
+  "settings.on": "вкл.",
+  "settings.off": "выкл.",
+  "settings.buttonAutoOn": "Автопоиск вкл.",
+  "settings.buttonAutoOff": "Только мои токены",
+  "settings.levelStrict": "Strict ($1,000 / 5%)",
+  "settings.levelLowCap": "Low-Cap ($300 / 10%)",
 
   "card.title": "ОБНАРУЖЕН КОНТРАКТ МИГРАЦИИ",
   "card.titleManual": "АНАЛИЗ КОНТРАКТА",
@@ -407,6 +472,25 @@ const ru: Dict = {
   "card.eventWord": "Событие",
   "card.variableWord": "переменная",
   "card.noSignals": "явных признаков не найдено",
+  "card.sourceAuto": "Автопоиск: найдено при сканировании всех новых контрактов",
+  "card.sourceCustodian": "Задеплоено RWA-кастодианом {label}",
+  "card.sourceSelf": "сам контракт (это и есть новый токен)",
+  "card.unverifiedNote": "только тикер, без адреса контракта — ни с каким токеном не сопоставлен",
+  "card.liquidity": "Ликвидность (OKX)",
+  "card.liquidityUnchecked": "не проверена: {reason}",
+  "custodians.header": "RWA-кастодианы (их деплои не проходят DEX-фильтр ликвидности):",
+  "custodians.empty": "RWA-кастодианов пока нет. Добавить: /add_custodian <сеть> <адрес_деплоера> <название>",
+  "custodians.addUsage": "Использование: /add_custodian <сеть> <адрес_деплоера> <название>\nСети: {networks}",
+  "custodians.removeUsage": "Использование: /remove_custodian <сеть> <адрес_деплоера>",
+  "custodians.added": "✅ {label} ({network}, {address}) добавлен как RWA-кастодиан.",
+  "custodians.removed": "🗑 {address} убран из RWA-кастодианов.",
+  "custodians.notFound": "{address} не зарегистрирован как кастодиан в этой сети.",
+  "status.auto": "🛰 Автопоиск: новых контрактов {creations} · кандидатов в миграции {candidates} · отсеяно по ликвидности {liquidity} · алертов {alerts} · в очереди {waiting}",
+  "status.autoOff": "🛰 Автопоиск: выкл. (AUTO_DISCOVERY=false)",
+  "status.okxOn": "💧 OKX API ликвидности: настроен",
+  "status.okxOff": "💧 OKX API ликвидности: НЕ настроен — алерты автопоиска придерживаются, пока не заданы OKX_API_KEY / OKX_SECRET_KEY / OKX_API_PASSPHRASE",
+  "status.blockTrace": "трассировка блоков: {state}",
+  "status.traceUntested": "ещё не проверялась",
   "card.links": "Ссылки:",
 
   "owners.more": "… и ещё {count}",
