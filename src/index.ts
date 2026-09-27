@@ -10,7 +10,7 @@ import {
 } from "./queue/notificationQueue.js";
 import { env } from "./config/env.js";
 import { custodianRepository, parseCustodianSeed } from "./db/repositories/custodianRepository.js";
-import { isOkxConfigured } from "./liquidity/okxLiquidity.js";
+import { autoDiscoveryMode } from "./config/autoMode.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
 import { createBot, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
@@ -25,13 +25,16 @@ async function main() {
   const worker = startContractCreationWorker(async (analyzed) => {
     await broadcastMigrationAlert(bot, analyzed);
   });
-  const autoWorker = env.AUTO_DISCOVERY
+  const autoOn = autoDiscoveryMode() === "on";
+  const autoWorker = autoOn
     ? startAutoDiscoveryWorker(async (analyzed) => {
         await broadcastMigrationAlert(bot, analyzed);
       })
     : null;
-  if (env.AUTO_DISCOVERY && !isOkxConfigured()) {
-    logger.warn("Auto-discovery is on but OKX_API_KEY/OKX_SECRET_KEY/OKX_API_PASSPHRASE are not set: auto-discovered alerts will be held back");
+  if (autoDiscoveryMode() === "paused-no-okx") {
+    logger.warn(
+      "Auto-discovery paused: OKX_API_KEY/OKX_SECRET_KEY/OKX_API_PASSPHRASE are not set, so no auto alert could pass the liquidity filter — not spending RPC on it",
+    );
   }
 
   // Documented tokenized-stock deployers (Robinhood, Dinari) on first start,
@@ -62,7 +65,7 @@ async function main() {
               logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue analysis job");
             });
           },
-          env.AUTO_DISCOVERY && (env.autoDiscoveryNetworks().length === 0 || env.autoDiscoveryNetworks().includes(network))
+          autoOn && (env.autoDiscoveryNetworks().length === 0 || env.autoDiscoveryNetworks().includes(network))
             ? async (event) => {
                 await enqueueAutoCandidate(event).catch((err) => {
                   logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue auto-discovery job");

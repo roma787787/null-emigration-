@@ -208,7 +208,8 @@ add it with `/add_custodian`.
 so it needs WebSocket RPCs with plenty of throughput (the spec asks for
 50–100 RPS per network via QuickNode, Chainstack or Alchemy) and an endpoint
 that supports `debug_traceBlockByNumber` or `trace_block`. Without OKX keys
-auto-discovered alerts are held back (`/status` shows this); tracked
+no auto alert could pass the liquidity filter, so auto-discovery stays
+paused (it would only burn RPC quota) and `/status` says so; tracked
 projects' alerts are unaffected.
 
 ## Bot commands

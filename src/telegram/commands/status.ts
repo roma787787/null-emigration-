@@ -7,6 +7,7 @@ import { getListenerStatus, type ListenerStatus } from "../../chain/listenerStat
 import { blockTraceStatus, traceDetectionStatus } from "../../chain/traceCreateDetector.js";
 import { totalAutoStats, type AutoStats } from "../../chain/autoStats.js";
 import { isOkxConfigured, okxHealth } from "../../liquidity/okxLiquidity.js";
+import { autoDiscoveryMode, type AutoMode } from "../../config/autoMode.js";
 import { statsRepository } from "../../db/repositories/statsRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
 import { getAutoDiscoveryQueue, getContractCreationQueue } from "../../queue/notificationQueue.js";
@@ -38,7 +39,7 @@ export interface StatusReport {
   counts: { tokens: number; owners: number; contracts: number };
   queue: { waiting: number; active: number; delayed: number; failed: number };
   networks: NetworkReport[];
-  auto?: { enabled: boolean; okxConfigured: boolean; stats: AutoStats; waiting: number };
+  auto?: { mode: AutoMode; okxConfigured: boolean; stats: AutoStats; waiting: number };
 }
 
 export function formatDuration(ms: number): string {
@@ -99,7 +100,8 @@ function networkLine(lang: Language, report: NetworkReport, now: number): string
 
 function autoLines(lang: Language, report: StatusReport): string[] {
   if (!report.auto) return [];
-  if (!report.auto.enabled) return [t(lang, "status.autoOff")];
+  if (report.auto.mode === "off") return [t(lang, "status.autoOff")];
+  if (report.auto.mode === "paused-no-okx") return [t(lang, "status.autoPaused")];
   const { stats } = report.auto;
   return [
     t(lang, "status.auto", {
@@ -142,17 +144,18 @@ async function chainHead(network: NetworkKey): Promise<bigint | null> {
 
 export async function collectStatus(): Promise<StatusReport> {
   const okxConfigured = isOkxConfigured();
+  const autoMode = autoDiscoveryMode();
   const [counts, jobCounts, autoCounts, networks] = await Promise.all([
     statsRepository.counts(),
     getContractCreationQueue().getJobCounts("waiting", "active", "delayed", "failed"),
-    env.AUTO_DISCOVERY ? getAutoDiscoveryQueue().getJobCounts("waiting") : Promise.resolve({ waiting: 0 }),
+    autoMode === "on" ? getAutoDiscoveryQueue().getJobCounts("waiting") : Promise.resolve({ waiting: 0 }),
     Promise.all(
       enabledNetworks().map(async (network): Promise<NetworkReport> => ({
         network,
         listener: getListenerStatus(network),
         head: await chainHead(network),
         trace: env.ENABLE_FACTORY_TRACE_DETECTION ? traceDetectionStatus(network) : "off",
-        blockTrace: env.AUTO_DISCOVERY && env.ENABLE_FACTORY_TRACE_DETECTION ? blockTraceStatus(network) : "off",
+        blockTrace: autoMode === "on" && env.ENABLE_FACTORY_TRACE_DETECTION ? blockTraceStatus(network) : "off",
         okx: okxConfigured ? await okxHealth(network).catch((err) => ({ ok: false, detail: String(err) })) : null,
       })),
     ),
@@ -167,7 +170,7 @@ export async function collectStatus(): Promise<StatusReport> {
       failed: jobCounts.failed ?? 0,
     },
     networks,
-    auto: { enabled: env.AUTO_DISCOVERY, okxConfigured, stats: totalAutoStats(), waiting: autoCounts.waiting ?? 0 },
+    auto: { mode: autoMode, okxConfigured, stats: totalAutoStats(), waiting: autoCounts.waiting ?? 0 },
   };
 }
 
