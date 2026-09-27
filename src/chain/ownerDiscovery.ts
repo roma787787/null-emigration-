@@ -1,7 +1,7 @@
 import { getAddress, isAddressEqual, zeroAddress, type Address } from "viem";
 import type { NetworkKey, OwnerSource } from "../types/index.js";
 import { getPublicClient } from "./provider.js";
-import { networks } from "../config/networks.js";
+import { getNetwork } from "../config/networks.js";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
@@ -30,7 +30,7 @@ export async function getContractDeployer(network: NetworkKey, tokenAddress: Add
   }
 
   const url = new URL(ETHERSCAN_V2_API_URL);
-  url.searchParams.set("chainid", String(networks[network].chain.id));
+  url.searchParams.set("chainid", String(getNetwork(network).chain.id));
   url.searchParams.set("module", "contract");
   url.searchParams.set("action", "getcontractcreation");
   url.searchParams.set("contractaddresses", tokenAddress);

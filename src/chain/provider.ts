@@ -1,6 +1,6 @@
 import { createPublicClient, fallback, http, webSocket } from "viem";
 import type { NetworkKey } from "../types/index.js";
-import { networks, rpcUrlsForNetwork } from "../config/networks.js";
+import { getNetwork, rpcUrlsForNetwork } from "../config/networks.js";
 
 function isWebSocketUrl(url: string): boolean {
   return url.startsWith("ws://") || url.startsWith("wss://");
@@ -27,7 +27,7 @@ function buildClient(network: NetworkKey) {
   );
 
   return {
-    client: createPublicClient({ chain: networks[network].chain, transport }),
+    client: createPublicClient({ chain: getNetwork(network).chain, transport }),
     hasWebSocket: sorted.some(isWebSocketUrl),
   };
 }

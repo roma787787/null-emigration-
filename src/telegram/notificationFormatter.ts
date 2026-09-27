@@ -1,5 +1,5 @@
 import type { Language, MigrationContractRecord, TokenRecord } from "../types/index.js";
-import { networks } from "../config/networks.js";
+import { getNetwork } from "../config/networks.js";
 import { t } from "./i18n/index.js";
 
 function shorten(address: string): string {
@@ -39,7 +39,7 @@ function foundSignals(lang: Language, migration: MigrationContractRecord): strin
  * the receiving chat's chosen language.
  */
 export function formatMigrationAlert(token: TokenRecord, migration: MigrationContractRecord, lang: Language): string {
-  const network = networks[token.network];
+  const network = getNetwork(token.network);
   const symbol = token.symbol ? escapeMd(token.symbol) : "UNKNOWN";
   const tokenA = `${symbol} \\(${escapeMd(shorten(token.address))}\\)`;
   const creator = escapeMd(shorten(migration.creatorAddress));

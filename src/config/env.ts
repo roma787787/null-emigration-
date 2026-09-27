@@ -8,27 +8,17 @@ function required(name: string, value: string | undefined): string {
   return value;
 }
 
-function parseList(value: string | undefined): string[] {
+export function parseList(value: string | undefined): string[] {
   return (value ?? "")
     .split(",")
     .map((v) => v.trim())
     .filter((v) => v.length > 0);
 }
 
-const allNetworkKeys: NetworkKey[] = [
-  "ethereum",
-  "bsc",
-  "arbitrum",
-  "base",
-  "optimism",
-  "polygon",
-  "avalanche",
-  "linea",
-  "scroll",
-  "blast",
-  "polygon-zkevm",
-  "hyperevm",
-];
+/** Network key -> env var fragment, e.g. "polygon-zkevm" -> "POLYGON_ZKEVM" (as in RPC_POLYGON_ZKEVM). */
+export function envKeyFor(network: NetworkKey): string {
+  return network.toUpperCase().replace(/-/g, "_");
+}
 
 export const env = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ?? "",
@@ -42,14 +32,12 @@ export const env = {
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY ?? "",
 
   rpcUrlsFor(network: NetworkKey): string[] {
-    const envKey = `RPC_${network.toUpperCase().replace(/-/g, "_")}`;
-    return parseList(process.env[envKey]);
+    return parseList(process.env[`RPC_${envKeyFor(network)}`]);
   },
 
-  enabledNetworks(): NetworkKey[] {
-    const configured = parseList(process.env.ENABLED_NETWORKS);
-    if (configured.length === 0) return allNetworkKeys;
-    return configured.filter((k): k is NetworkKey => allNetworkKeys.includes(k as NetworkKey));
+  /** Raw ENABLED_NETWORKS list; resolved against known networks in networks.ts. */
+  enabledNetworksRaw(): string[] {
+    return parseList(process.env.ENABLED_NETWORKS).map((k) => k.toLowerCase());
   },
 
   /**

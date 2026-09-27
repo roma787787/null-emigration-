@@ -30,9 +30,33 @@ TypeScript (Node.js) + [viem](https://viem.sh) + PostgreSQL + Redis
 
 ## Supported networks
 
-Ethereum, BNB Smart Chain, Arbitrum One, Base, Optimism, Polygon, Avalanche,
-Linea, Scroll, Blast, Polygon zkEVM, HyperEVM — see `src/config/networks.ts`.
-Adding a network means adding one entry there plus an `RPC_<NETWORK>` env var.
+Built in: Ethereum, BNB Smart Chain, Arbitrum One, Base, Optimism, Polygon,
+Avalanche, Linea, Scroll, Blast, Polygon zkEVM, HyperEVM (see
+`src/config/networks.ts`). Keys for `ENABLED_NETWORKS`: `ethereum, bsc,
+arbitrum, base, optimism, polygon, avalanche, linea, scroll, blast,
+polygon-zkevm, hyperevm`.
+
+### Adding any other EVM network (no code change)
+
+Declare it with environment variables — e.g. for Sonic:
+
+```
+EXTRA_NETWORKS=sonic                          # comma-separated, lowercase keys
+NETWORK_SONIC_CHAIN_ID=146                    # required
+RPC_SONIC=wss://...,https://...               # required (no public default)
+NETWORK_SONIC_NAME=Sonic                      # optional, shown in alerts
+NETWORK_SONIC_EXPLORER=https://sonicscan.org  # optional, else Blockscan links
+NETWORK_SONIC_DEXSCREENER=sonic               # optional, DexScreener URL slug
+```
+
+The env var fragment is the key upper-cased with `-` → `_` (key `zk-sync`
+→ `NETWORK_ZK_SYNC_CHAIN_ID`, `RPC_ZK_SYNC`). A declared network is watched
+automatically — it doesn't also need listing in `ENABLED_NETWORKS` — and
+shows up in `/add_token`, `/settings` and the alert card. A network with a
+missing/invalid chain id or RPC is skipped with an error in the startup
+log instead of crashing the bot, and every other network keeps running.
+Deployer lookup works for it only if Etherscan's multichain API covers that
+chain id; `owner()`/`admin()` discovery works regardless.
 
 ## Getting started
 

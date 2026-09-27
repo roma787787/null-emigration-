@@ -9,8 +9,14 @@ import { foundry } from "viem/chains";
 
 process.env.DATABASE_URL ??= "postgres://tracker:tracker@localhost:5432/migration_tracker";
 process.env.REDIS_URL ??= "redis://localhost:6379";
-process.env.RPC_ETHEREUM ??= "ws://127.0.0.1:8545,http://127.0.0.1:8545";
-process.env.ENABLED_NETWORKS = "ethereum";
+// The local chain is declared exactly the way an operator adds a new network
+// in production (EXTRA_NETWORKS), so this also exercises that path.
+const NETWORK = "anvil";
+process.env.EXTRA_NETWORKS = NETWORK;
+process.env.NETWORK_ANVIL_CHAIN_ID = "31337";
+process.env.NETWORK_ANVIL_NAME = "Anvil (local)";
+process.env.RPC_ANVIL ??= "ws://127.0.0.1:8545,http://127.0.0.1:8545";
+process.env.ENABLED_NETWORKS = NETWORK;
 process.env.LOG_LEVEL ??= "warn";
 process.env.NODE_ENV = "production";
 
@@ -51,8 +57,8 @@ await getContractCreationQueue().obliterate({ force: true });
 // --- Token A / Token B, then simulate /add_token ---------------------------
 const oldToken = await deploy(owner, "SimpleToken", ["Old Token", "OLD", 10n ** 24n]);
 const newToken = await deploy(owner, "SimpleToken", ["New Token", "NEW", 10n ** 24n]);
-const token = await tokenRepository.add("ethereum", oldToken.address, "e2e-chat", { symbol: "OLD", name: "Old Token" });
-const owners = await discoverAllOwners("ethereum", oldToken.address);
+const token = await tokenRepository.add(NETWORK, oldToken.address, "e2e-chat", { symbol: "OLD", name: "Old Token" });
+const owners = await discoverAllOwners(NETWORK, oldToken.address);
 for (const o of owners) await ownerRepository.upsert(token.id, o.address, o.source);
 console.log(`Token A ${oldToken.address}, Token B ${newToken.address}`);
 console.log("Discovered owners:", owners.map((o) => `${o.address} (${o.source})`).join(", ") || "none");
@@ -77,7 +83,7 @@ startContractCreationWorker(async ({ token: tk, migrationContract: mc }) => {
     card: formatMigrationAlert(tk, mc, "ru"),
   });
 });
-startBlockListener("ethereum", (event) => enqueueContractCreation(event));
+startBlockListener(NETWORK, (event) => enqueueContractCreation(event));
 await new Promise((r) => setTimeout(r, 1500));
 
 // --- scenarios --------------------------------------------------------------

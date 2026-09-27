@@ -1,16 +1,9 @@
-export type NetworkKey =
-  | "ethereum"
-  | "bsc"
-  | "arbitrum"
-  | "base"
-  | "optimism"
-  | "polygon"
-  | "avalanche"
-  | "linea"
-  | "scroll"
-  | "blast"
-  | "polygon-zkevm"
-  | "hyperevm";
+/**
+ * A network's registry key — one of the built-ins in src/config/networks.ts
+ * or a custom one declared via EXTRA_NETWORKS, so it's validated at runtime
+ * (isKnownNetwork) rather than as a closed string union.
+ */
+export type NetworkKey = string;
 
 export type OwnerSource = "deployer" | "owner" | "admin" | "default_admin_role" | "manual";
 
