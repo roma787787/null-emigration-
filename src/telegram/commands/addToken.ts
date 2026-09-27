@@ -8,6 +8,7 @@ import { tokenRepository } from "../../db/repositories/tokenRepository.js";
 import { ownerRepository } from "../../db/repositories/ownerRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
+import { formatOwnerLines } from "../views/ownerLines.js";
 import { logger } from "../../utils/logger.js";
 
 export function registerAddTokenCommand(bot: Telegraf): void {
@@ -67,7 +68,7 @@ export function registerAddTokenCommand(bot: Telegraf): void {
 
     const ownerLines =
       owners.length > 0
-        ? owners.map((o) => `  • ${o.address} (${o.source})`).join("\n")
+        ? formatOwnerLines(owners, lang, "  ")
         : t(lang, "addToken.ownersNone");
 
     await ctx.reply(

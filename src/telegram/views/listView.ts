@@ -3,6 +3,7 @@ import { tokenRepository } from "../../db/repositories/tokenRepository.js";
 import { ownerRepository } from "../../db/repositories/ownerRepository.js";
 import type { Language } from "../../types/index.js";
 import { t } from "../i18n/index.js";
+import { formatOwnerLines } from "./ownerLines.js";
 
 const PAGE_SIZE = 5;
 
@@ -30,7 +31,7 @@ export async function renderListPage(
     pageTokens.map(async (token) => {
       const owners = await ownerRepository.listForToken(token.id);
       const ownerLines =
-        owners.length > 0 ? owners.map((o) => `    • ${o.address} (${o.source})`).join("\n") : t(lang, "list.ownersNone");
+        owners.length > 0 ? formatOwnerLines(owners, lang, "    ") : t(lang, "list.ownersNone");
       return [`🪙 ${token.symbol ?? "?"} — ${token.network} — ${token.address}`, t(lang, "list.ownersLabel"), ownerLines].join(
         "\n",
       );

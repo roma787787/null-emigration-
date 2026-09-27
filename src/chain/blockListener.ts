@@ -1,6 +1,6 @@
 import type { Address } from "viem";
 import type { ContractCreationEvent, NetworkKey } from "../types/index.js";
-import { getPublicClient, networkHasWebSocket } from "./provider.js";
+import { getPublicClient, networkHasWebSocket, resetWebSocketConnections } from "./provider.js";
 import { ownerRepository } from "../db/repositories/ownerRepository.js";
 import { networkCursorRepository } from "../db/repositories/networkCursorRepository.js";
 import { initListenerStatus, recordListenerError } from "./listenerStatus.js";
@@ -38,6 +38,14 @@ export function blockRange(
 }
 
 const CURSOR_SAVE_INTERVAL_MS = 5_000;
+
+// Watchdog: when no new head has arrived for STALL_MS, ask the chain for its
+// head directly (the fallback transport reaches it over HTTP even if the
+// WebSocket is dead). If the chain has moved on, the feed is stalled: catch up
+// and restart it. Sparse chains that simply had no new block are left alone.
+const WATCHDOG_INTERVAL_MS = 15_000;
+const STALL_MS = 45_000;
+const HEAD_TIMEOUT_MS = 15_000;
 
 // With no tracked wallets at all there's nothing to match, so blocks aren't
 // fetched (saves RPC quota); the answer is cached briefly across networks.
@@ -109,7 +117,9 @@ export function startBlockListener(
     })
     .catch((err) => logger.warn({ err, network }, "Could not load block cursor; starting from the chain head"));
 
+  let lastHeadAt = Date.now();
   const onBlockNumber = (blockNumber: bigint) => {
+    lastHeadAt = Date.now();
     processing = processing.then(async () => {
       try {
         const range = blockRange(lastProcessedBlock, blockNumber, env.MAX_CATCHUP_BLOCKS);
@@ -161,18 +171,55 @@ export function startBlockListener(
     onError: typeof onError;
   }) => () => void;
 
-  const unwatch = watchBlockNumber({
-    emitOnBegin: true,
-    poll: !usesWebSocket,
-    pollingInterval: env.BLOCK_POLL_INTERVAL_MS,
-    onBlockNumber,
-    onError,
-  });
+  const watch = () =>
+    watchBlockNumber({
+      emitOnBegin: true,
+      poll: !usesWebSocket,
+      pollingInterval: env.BLOCK_POLL_INTERVAL_MS,
+      onBlockNumber,
+      onError,
+    });
+  let unwatch = watch();
+
+  let checking = false;
+  const watchdog = setInterval(async () => {
+    if (stopped || checking || Date.now() - lastHeadAt < STALL_MS) return;
+    checking = true;
+    try {
+      const head = await Promise.race([
+        client.getBlockNumber({ cacheTime: 0 }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("head request timed out")), HEAD_TIMEOUT_MS)),
+      ]);
+      if (stopped) return;
+      if (lastProcessedBlock !== null && head <= lastProcessedBlock) {
+        lastHeadAt = Date.now(); // quiet chain, feed is fine
+        return;
+      }
+      status.restarts++;
+      logger.warn(
+        { network, head: head.toString(), lastProcessed: lastProcessedBlock?.toString() ?? null },
+        "Block feed stalled — catching up and restarting it",
+      );
+      unwatch();
+      if (usesWebSocket) resetWebSocketConnections(network);
+      onBlockNumber(head);
+      unwatch = watch();
+    } catch (err) {
+      // No head at all: the provider is down, or a WebSocket is open but dead
+      // and holding requests up. Drop the sockets so the next tick starts fresh.
+      recordListenerError(network, err);
+      if (usesWebSocket) resetWebSocketConnections(network);
+    } finally {
+      checking = false;
+    }
+  }, WATCHDOG_INTERVAL_MS);
+  watchdog.unref();
 
   logger.info({ network, mode: status.mode }, "Started block listener");
 
   // Stops watching, lets the block in flight finish, and persists the cursor.
   return async () => {
+    clearInterval(watchdog);
     unwatch();
     stopped = true;
     await processing;

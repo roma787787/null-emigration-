@@ -15,7 +15,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "test": "node --import tsx --test",
     "test:e2e": "tsx e2e/run.ts",
-    "test:bot": "tsx e2e/bot.ts"
+    "test:bot": "tsx e2e/bot.ts",
+    "test:resilience": "tsx e2e/resilience.ts"
   },
   "dependencies": {
     "bullmq": "^5.12.0",

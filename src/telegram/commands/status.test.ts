@@ -20,6 +20,7 @@ const report: StatusReport = {
         lastProcessedAt: new Date(now - 8_000),
         skippedBlocks: 0,
         failedBlocks: 0,
+        restarts: 0,
         lastError: null,
         lastErrorAt: null,
       },
@@ -35,6 +36,7 @@ const report: StatusReport = {
         lastProcessedAt: null,
         skippedBlocks: 40,
         failedBlocks: 2,
+        restarts: 1,
         lastError: "HTTP request failed.\nStatus: 429",
         lastErrorAt: new Date(now - 90_000),
       },
@@ -51,6 +53,7 @@ const report: StatusReport = {
         lastProcessedAt: new Date(now - 4 * 60_000),
         skippedBlocks: 0,
         failedBlocks: 0,
+        restarts: 0,
         lastError: null,
         lastErrorAt: null,
       },
@@ -67,6 +70,7 @@ const report: StatusReport = {
         lastProcessedAt: null,
         skippedBlocks: 0,
         failedBlocks: 0,
+        restarts: 0,
         lastError: null,
         lastErrorAt: null,
       },
@@ -83,6 +87,7 @@ const report: StatusReport = {
         lastProcessedAt: new Date(now - 30 * 60_000),
         skippedBlocks: 0,
         failedBlocks: 0,
+        restarts: 0,
         lastError: null,
         lastErrorAt: null,
       },
@@ -110,6 +115,7 @@ test("flags a stalled network with its problems, and a missing listener", () => 
   assert.match(text, /🔴 base · polling · no blocks processed yet · factory trace: unavailable on this RPC/);
   assert.match(text, /skipped after downtime: 40/);
   assert.match(text, /failed blocks: 2/);
+  assert.match(text, /block feed restarted after a stall: 1/);
   assert.match(text, /last error 1m ago: HTTP request failed\.$/m);
   assert.match(text, /🔴 bsc · listener not running/);
 });

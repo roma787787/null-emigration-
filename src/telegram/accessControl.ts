@@ -4,6 +4,7 @@ import { chatSettingsRepository } from "../db/repositories/chatSettingsRepositor
 import type { Language } from "../types/index.js";
 import { t, languages, languageLabels, DEFAULT_LANGUAGE } from "./i18n/index.js";
 import { logger } from "../utils/logger.js";
+import { sendWithRetry } from "./send.js";
 
 /** Commands usable before language selection / admin approval. */
 const BYPASS_COMMANDS = new Set(["start", "help", "language"]);
@@ -42,7 +43,8 @@ async function notifyAdminsOfRequest(bot: Telegraf, ctx: Context, chatId: string
     const adminLang = adminSettings?.language ?? DEFAULT_LANGUAGE;
 
     try {
-      await bot.telegram.sendMessage(
+      await sendWithRetry(
+        bot,
         adminId,
         t(adminLang, "approval.adminRequest", { title, chatId, username, language }),
         Markup.inlineKeyboard([
@@ -168,8 +170,8 @@ export function registerAccessControl(bot: Telegraf): void {
     await chatSettingsRepository.setApproved(targetChatId!, approve);
     await ctx.answerCbQuery(confirmation);
     await ctx.editMessageText(confirmation).catch(() => undefined);
-    await bot.telegram
-      .sendMessage(targetChatId!, t(targetLang, approve ? "approval.granted" : "approval.deniedNotice"))
-      .catch(() => undefined);
+    await sendWithRetry(bot, targetChatId!, t(targetLang, approve ? "approval.granted" : "approval.deniedNotice")).catch(
+      () => undefined,
+    );
   });
 }

@@ -125,6 +125,7 @@ const en: Dict = {
   "card.noSignals": "no explicit signals found",
   "card.links": "Links:",
 
+  "owners.more": "… and {count} more",
   "owners.refreshedNew": "🔄 {symbol} on {network}: new owner/admin wallets found and now watched:\n{owners}",
 
   "status.adminOnly": "This command is available to administrators only.",
@@ -146,6 +147,7 @@ const en: Dict = {
   "status.traceOff": "off",
   "status.skipped": "skipped after downtime: {count}",
   "status.failedBlocks": "failed blocks: {count}",
+  "status.restarts": "block feed restarted after a stall: {count}",
   "status.lastError": "last error {ago} ago: {error}",
 };
 
@@ -265,6 +267,7 @@ const uk: Dict = {
   "card.noSignals": "явних ознак не знайдено",
   "card.links": "Посилання:",
 
+  "owners.more": "… і ще {count}",
   "owners.refreshedNew": "🔄 {symbol} у мережі {network}: знайдено нові гаманці власників/адмінів, тепер вони відстежуються:\n{owners}",
 
   "status.adminOnly": "Ця команда доступна лише адміністраторам.",
@@ -286,6 +289,7 @@ const uk: Dict = {
   "status.traceOff": "вимк.",
   "status.skipped": "пропущено після простою: {count}",
   "status.failedBlocks": "блоків з помилкою: {count}",
+  "status.restarts": "потік блоків перезапущено після зависання: {count}",
   "status.lastError": "остання помилка {ago} тому: {error}",
 };
 
@@ -405,6 +409,7 @@ const ru: Dict = {
   "card.noSignals": "явных признаков не найдено",
   "card.links": "Ссылки:",
 
+  "owners.more": "… и ещё {count}",
   "owners.refreshedNew": "🔄 {symbol} в сети {network}: найдены новые кошельки владельцев/админов, теперь они отслеживаются:\n{owners}",
 
   "status.adminOnly": "Эта команда доступна только администраторам.",
@@ -426,6 +431,7 @@ const ru: Dict = {
   "status.traceOff": "выкл.",
   "status.skipped": "пропущено после простоя: {count}",
   "status.failedBlocks": "блоков с ошибкой: {count}",
+  "status.restarts": "поток блоков перезапущен после зависания: {count}",
   "status.lastError": "последняя ошибка {ago} назад: {error}",
 };
 

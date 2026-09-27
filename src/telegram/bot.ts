@@ -14,7 +14,9 @@ import { chatSettingsRepository } from "../db/repositories/chatSettingsRepositor
 import type { AnalyzedMigration } from "../queue/notificationQueue.js";
 import type { OwnersRefreshed } from "../chain/ownerRefresh.js";
 import { DEFAULT_LANGUAGE, t } from "./i18n/index.js";
+import { formatOwnerLines } from "./views/ownerLines.js";
 import { logger } from "../utils/logger.js";
+import { sendWithRetry } from "./send.js";
 
 export function createBot(token: string): Telegraf {
   const bot = new Telegraf(token);
@@ -55,7 +57,7 @@ export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedM
     const message = formatMigrationAlert(token, migrationContract, chat.language ?? DEFAULT_LANGUAGE, { update });
 
     try {
-      await bot.telegram.sendMessage(chat.chatId, message, {
+      await sendWithRetry(bot, chat.chatId, message, {
         parse_mode: "MarkdownV2",
         link_preview_options: { is_disabled: true },
       });
@@ -72,10 +74,10 @@ export async function notifyNewOwners(bot: Telegraf, { token, added }: OwnersRef
   const text = t(lang, "owners.refreshedNew", {
     symbol: token.symbol ?? token.address,
     network: token.network,
-    owners: added.map((o) => `  • ${o.address} (${o.source})`).join("\n"),
+    owners: formatOwnerLines(added, lang, "  "),
   });
   try {
-    await bot.telegram.sendMessage(token.addedByChatId, text);
+    await sendWithRetry(bot, token.addedByChatId, text);
   } catch (err) {
     logger.error({ err, chatId: token.addedByChatId }, "Failed to deliver owner-refresh notice");
   }

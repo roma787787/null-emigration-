@@ -73,6 +73,7 @@ function networkLine(lang: Language, report: NetworkReport, now: number): string
   const extra: string[] = [];
   if (listener.skippedBlocks > 0) extra.push(t(lang, "status.skipped", { count: listener.skippedBlocks }));
   if (listener.failedBlocks > 0) extra.push(t(lang, "status.failedBlocks", { count: listener.failedBlocks }));
+  if (listener.restarts > 0) extra.push(t(lang, "status.restarts", { count: listener.restarts }));
   if (listener.lastError && listener.lastErrorAt) {
     extra.push(
       t(lang, "status.lastError", {

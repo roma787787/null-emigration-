@@ -10,6 +10,8 @@ export interface ListenerStatus {
   skippedBlocks: number;
   /** Blocks abandoned after every retry failed. */
   failedBlocks: number;
+  /** Times the watchdog found the block feed stalled and restarted it. */
+  restarts: number;
   lastError: string | null;
   lastErrorAt: Date | null;
 }
@@ -24,6 +26,7 @@ export function initListenerStatus(network: NetworkKey, mode: ListenerStatus["mo
     lastProcessedAt: null,
     skippedBlocks: 0,
     failedBlocks: 0,
+    restarts: 0,
     lastError: null,
     lastErrorAt: null,
   };

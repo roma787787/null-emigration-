@@ -28,11 +28,16 @@ const ALICE = 2002; // approved, Ukrainian, all alerts
 const BOB = 3003; // rejected by the admin, Russian
 const CAROL = 4004; // approved, English, only watches "ethereum"
 const DAN = 5005; // never picks a language
+const GROUP = -100500; // a group chat, set up by member 6006
+const MEMBER = 6006;
 process.env.ADMIN_CHAT_IDS = String(ADMIN);
 
 // --- fake Telegram Bot API ------------------------------------------------------
 type Call = { method: string; body: Record<string, unknown>; at: number; rejected?: string };
 const calls: Call[] = [];
+// Errors the fake API answers the next sendMessage(s) to a chat with, in order.
+type InjectedError = { error_code: number; description: string; parameters?: { retry_after: number } };
+const injected = new Map<number, InjectedError[]>();
 let nextMessageId = 1;
 
 /** Returns why Telegram would reject this MarkdownV2 text, or null. */
@@ -120,6 +125,15 @@ const telegramApi = createServer((req, res) => {
     const call: Call = { method, body, at: Date.now() };
     const reason = rejectionReason(method, body);
     res.setHeader("content-type", "application/json");
+    const queued = method === "sendMessage" ? injected.get(Number(body.chat_id)) : undefined;
+    const failure = queued?.shift();
+    if (failure) {
+      call.rejected = `injected ${failure.error_code}`;
+      calls.push(call);
+      res.statusCode = failure.error_code;
+      res.end(JSON.stringify({ ok: false, ...failure }));
+      return;
+    }
     if (reason) {
       call.rejected = reason;
       calls.push(call);
@@ -186,7 +200,9 @@ let updateId = 1;
 function user(id: number) {
   return { id, is_bot: false, first_name: `User${id}`, username: `user${id}` };
 }
-async function send(chatId: number, text: string): Promise<Call[]> {
+const chatOf = (chatId: number) =>
+  chatId < 0 ? { id: chatId, type: "group", title: "Team chat" } : { id: chatId, type: "private", first_name: `User${chatId}` };
+async function send(chatId: number, text: string, fromId = chatId): Promise<Call[]> {
   const from = calls.length;
   const command = text.split(/\s+/)[0]!;
   await bot.handleUpdate({
@@ -194,24 +210,24 @@ async function send(chatId: number, text: string): Promise<Call[]> {
     message: {
       message_id: nextMessageId++,
       date: Math.floor(Date.now() / 1000),
-      chat: { id: chatId, type: "private", first_name: `User${chatId}` },
-      from: user(chatId),
+      chat: chatOf(chatId),
+      from: user(fromId),
       text,
       entities: command.startsWith("/") ? [{ type: "bot_command", offset: 0, length: command.length }] : [],
     },
   } as never);
   return calls.slice(from);
 }
-async function click(chatId: number, data: string): Promise<Call[]> {
+async function click(chatId: number, data: string, fromId = chatId): Promise<Call[]> {
   const from = calls.length;
   await bot.handleUpdate({
     update_id: updateId++,
     callback_query: {
       id: String(updateId),
-      from: user(chatId),
+      from: user(fromId),
       chat_instance: "ci",
       data,
-      message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: chatId, type: "private" }, text: "…" },
+      message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: chatOf(chatId), text: "…" },
     },
   } as never);
   return calls.slice(from);
@@ -416,10 +432,48 @@ sent = await alertsFor(ruCase.address, 20_000);
 check("after switching to Russian, Alice's next card is in Russian", has(textsTo(sent, ALICE), /ОБНАРУЖЕН КОНТРАКТ МИГРАЦИИ/), textsTo(sent, ALICE));
 
 // =====================================================================================
+section = "group chat";
+r = await send(GROUP, "/start@tracker_test_bot", MEMBER);
+check("/start@botname in a group shows the language picker", buttons(r).join() === "lang:en,lang:uk,lang:ru", buttons(r));
+r = await click(GROUP, "lang:en", MEMBER);
+check("the admin's request names the group and its (negative) chat id", has(textsTo(r, ADMIN), new RegExp(`Team chat[\\s\\S]*${GROUP}`)), textsTo(r, ADMIN));
+check("…with working Approve/Reject buttons for a negative id", buttons(r).join() === `admin:approve:${GROUP},admin:reject:${GROUP}`, buttons(r));
+r = await send(GROUP, "/list@tracker_test_bot", MEMBER);
+check("the group is blocked until approved", has(textsTo(r, GROUP), /administrator approval/), textsTo(r, GROUP));
+r = await click(ADMIN, `admin:approve:${GROUP}`);
+check("approving the group notifies it", has(textsTo(r, GROUP), /approved/), textsTo(r, GROUP));
+r = await send(GROUP, "/list@tracker_test_bot", MEMBER);
+check("after approval /list@botname works in the group", has(textsTo(r, GROUP), /Tracked tokens/), textsTo(r, GROUP));
+
+// =====================================================================================
+section = "telegram errors";
+// Alice blocked the bot (403); the admin hits flood control once (429, retry after 1s).
+injected.set(ALICE, [{ error_code: 403, description: "Forbidden: bot was blocked by the user" }]);
+injected.set(ADMIN, [{ error_code: 429, description: "Too Many Requests: retry after 1", parameters: { retry_after: 1 } }]);
+const floodCase = await deploy(owner, "MigratorWithGetters", [oldToken.address, newToken.address]);
+sent = await alertsFor(floodCase.address, 20_000);
+await new Promise((res) => setTimeout(res, 1500)); // the 429 retry lands ~1s later
+sent = calls.filter((c) => !c.rejected && c.method === "sendMessage" && String(c.body.text).toLowerCase().includes(floodCase.address.toLowerCase()));
+check("a chat that blocked the bot (403) doesn't stop delivery to the others", recipients(sent).includes(GROUP), recipients(sent));
+check("flood control (429) is waited out and the admin still gets the alert", recipients(sent).includes(ADMIN), recipients(sent));
+check("the blocked chat is not retried", calls.filter((c) => Number(c.body.chat_id) === ALICE && String(c.body.text).toLowerCase().includes(floodCase.address.toLowerCase())).length === 1);
+
+// =====================================================================================
+section = "long lists";
+for (let i = 1; i <= 60; i++) {
+  await send(ADMIN, `/add_owner anvil ${oldToken.address} 0x${i.toString(16).padStart(40, "0")}`);
+}
+r = await send(ALICE, "/list");
+const listText = textsTo(r, ALICE).join("\n");
+check("/list for a token with 60+ wallets stays under Telegram's limit and is accepted", listText.length > 0 && listText.length <= 4096 && r.every((c) => !c.rejected), { len: listText.length, rejected: r.map((c) => c.rejected) });
+check("…and says how many wallets are hidden", /и ещё \d+/.test(listText), listText.slice(-300));
+
+// =====================================================================================
 section = "hygiene";
 const outgoing = calls.filter((c) => c.method === "sendMessage" || c.method === "editMessageText");
 const rejected = calls.filter((c) => c.rejected);
-check(`all ${calls.length} Bot API calls were accepted (MarkdownV2, lengths, button data)`, rejected.length === 0, rejected.map((c) => `${c.method}: ${c.rejected}`));
+const unexpectedRejections = rejected.filter((c) => !c.rejected!.startsWith("injected"));
+check(`all ${calls.length} Bot API calls were accepted (MarkdownV2, lengths, button data)`, unexpectedRejections.length === 0, unexpectedRejections.map((c) => `${c.method}: ${c.rejected}`));
 const leaks = outgoing.filter((c) => /\{[a-zA-Z]+\}|undefined|NaN|\[object /.test(String(c.body.text)) || /^[a-z]+\.[a-zA-Z]+$/m.test(String(c.body.text)));
 check("no message has unfilled placeholders, 'undefined' or raw translation keys", leaks.length === 0, leaks.map((c) => c.body.text));
 

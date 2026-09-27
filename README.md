@@ -249,8 +249,20 @@ re-add), paginated `/list`, `/add_owner`, `/remove_token` confirm/cancel,
 `/settings` filters, `/analyze`, `/status` (admin vs non-admin); alert
 routing by approval, confidence filter, network filter and chat language;
 deploys from a manually linked wallet; the update card after a late
-`initialize()`; the owner-change notice; and that no message has an
-unfilled placeholder or raw translation key.
+`initialize()`; the owner-change notice; group chats (`/cmd@botname`,
+negative chat ids); a chat that blocked the bot (403) and flood control
+(429, waited out and retried); `/list` for a token with 60+ wallets staying
+under the length limit; and that no message has an unfilled placeholder or
+raw translation key.
+
+### Resilience test
+
+`npm run test:resilience` puts a TCP proxy between the bot and anvil and
+breaks it: a dropped WebSocket; a provider outage of `OUTAGE_SEC` (default
+90s, well past viem's own ~10s reconnect window) with a deploy mined during
+it; a WebSocket that stays open but silently stops delivering (only the
+listener's watchdog can notice); and a block packed with 300 transactions
+plus two owner deploys. Every deploy must still be detected.
 
 ## Known limitations / extension points
 

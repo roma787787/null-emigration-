@@ -1,4 +1,5 @@
 import { createPublicClient, fallback, http, webSocket } from "viem";
+import { socketClientCache } from "viem/utils";
 import type { NetworkKey } from "../types/index.js";
 import { getNetwork, rpcUrlsForNetwork } from "../config/networks.js";
 
@@ -21,7 +22,10 @@ function buildClient(network: NetworkKey) {
   const transport = fallback(
     sorted.map((url) =>
       isWebSocketUrl(url)
-        ? webSocket(url, { timeout: 10_000, retryCount: 2 })
+        ? // viem gives up after 5 reconnect attempts by default and then keeps the
+          // dead socket cached, so a provider outage longer than ~10s would
+          // silence this network for good; keep retrying instead.
+          webSocket(url, { timeout: 10_000, retryCount: 2, reconnect: { attempts: Number.MAX_SAFE_INTEGER, delay: 3_000 } })
         : http(url, { timeout: 10_000, retryCount: 2 }),
     ),
   );
@@ -60,4 +64,20 @@ export function getPublicClient(network: NetworkKey): AppPublicClient {
 /** Whether this network has at least one wss:// RPC configured (getPublicClient must run first). */
 export function networkHasWebSocket(network: NetworkKey): boolean {
   return webSocketAvailability.get(network) ?? false;
+}
+
+/**
+ * Drops this network's cached WebSocket connections so the next request opens
+ * fresh ones. Used when a connection looks open but has stopped delivering.
+ */
+export function resetWebSocketConnections(network: NetworkKey): number {
+  const wsUrls = new Set(rpcUrlsForNetwork(network).filter(isWebSocketUrl));
+  let closed = 0;
+  for (const socketClient of [...socketClientCache.values()]) {
+    if (wsUrls.has(socketClient.url)) {
+      socketClient.close();
+      closed++;
+    }
+  }
+  return closed;
 }
