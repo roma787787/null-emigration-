@@ -7,7 +7,7 @@ export function buildRemoveConfirmView(
   address: `0x${string}`,
   lang: Language,
 ): { text: string; keyboard: ReturnType<typeof Markup.inlineKeyboard> } {
-  const lines = tokens.map((token) => `  • ${token.symbol ?? "?"} on ${token.network}`);
+  const lines = tokens.map((token) => `  • ${token.symbol ?? "?"} — ${token.network}`);
   const text = [t(lang, "removeToken.confirmPrompt", { address }), "", ...lines].join("\n");
 
   const keyboard = Markup.inlineKeyboard([

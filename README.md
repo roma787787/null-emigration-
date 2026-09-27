@@ -237,6 +237,21 @@ exercised — the harness prints the rendered card instead. To change the
 fixtures, edit `e2e/Fixtures.sol` and regenerate `e2e/artifacts.json` with
 `npm i --no-save solc@0.8.24 && node e2e/compile.cjs`.
 
+### Bot acceptance test (Telegram layer)
+
+`npm run test:bot` drives the real bot — every command, inline button,
+access flow and language — and live alert delivery, against the same local
+chain and a fake Telegram Bot API that rejects what the real one would
+(broken MarkdownV2, texts over 4096 chars, button data over 64 bytes). It
+covers: language picker and admin approve/reject; blocking of unapproved,
+rejected and not-set-up chats; `/add_token` (validation, owner discovery,
+re-add), paginated `/list`, `/add_owner`, `/remove_token` confirm/cancel,
+`/settings` filters, `/analyze`, `/status` (admin vs non-admin); alert
+routing by approval, confidence filter, network filter and chat language;
+deploys from a manually linked wallet; the update card after a late
+`initialize()`; the owner-change notice; and that no message has an
+unfilled placeholder or raw translation key.
+
 ## Known limitations / extension points
 
 - **Factory-deployed contracts (`CREATE2` via a factory)**: detected via

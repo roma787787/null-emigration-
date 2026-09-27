@@ -158,17 +158,18 @@ export function registerAccessControl(bot: Telegraf): void {
 
     const targetSettings = await chatSettingsRepository.ensure(targetChatId!);
     const targetLang = targetSettings.language ?? DEFAULT_LANGUAGE;
+    // The admin's confirmation is in the admin's language, the notice in the user's.
+    const adminLang = (await chatSettingsRepository.get(actingChatId))?.language ?? DEFAULT_LANGUAGE;
+    const approve = action === "approve";
+    const confirmation = t(adminLang, approve ? "approval.approvedByAdmin" : "approval.rejectedByAdmin", {
+      chatId: targetChatId!,
+    });
 
-    if (action === "approve") {
-      await chatSettingsRepository.setApproved(targetChatId!, true);
-      await ctx.answerCbQuery(t(targetSettings.language ?? DEFAULT_LANGUAGE, "approval.approvedByAdmin", { chatId: targetChatId! }));
-      await ctx.editMessageText(t(targetSettings.language ?? DEFAULT_LANGUAGE, "approval.approvedByAdmin", { chatId: targetChatId! })).catch(() => undefined);
-      await bot.telegram.sendMessage(targetChatId!, t(targetLang, "approval.granted")).catch(() => undefined);
-    } else {
-      await chatSettingsRepository.setApproved(targetChatId!, false);
-      await ctx.answerCbQuery(t(targetSettings.language ?? DEFAULT_LANGUAGE, "approval.rejectedByAdmin", { chatId: targetChatId! }));
-      await ctx.editMessageText(t(targetSettings.language ?? DEFAULT_LANGUAGE, "approval.rejectedByAdmin", { chatId: targetChatId! })).catch(() => undefined);
-      await bot.telegram.sendMessage(targetChatId!, t(targetLang, "approval.deniedNotice")).catch(() => undefined);
-    }
+    await chatSettingsRepository.setApproved(targetChatId!, approve);
+    await ctx.answerCbQuery(confirmation);
+    await ctx.editMessageText(confirmation).catch(() => undefined);
+    await bot.telegram
+      .sendMessage(targetChatId!, t(targetLang, approve ? "approval.granted" : "approval.deniedNotice"))
+      .catch(() => undefined);
   });
 }
