@@ -9,6 +9,22 @@ export interface CustodianRecord {
 }
 
 const CACHE_TTL_MS = 30_000;
+
+/**
+ * Publicly documented tokenized-stock deployers, seeded once on first start.
+ * Backed Finance (xStocks) isn't listed: its factory address couldn't be
+ * confirmed from a public source — add it with /add_custodian.
+ */
+export const BUILTIN_CUSTODIANS: CustodianRecord[] = [
+  // Arbiscan label "Robinhood: Deployer" — deploys Robinhood's stock tokens on Arbitrum.
+  { network: "arbitrum", address: "0xcbdf630a858e7d87b5b08d92968ca14ca0f8f556", label: "Robinhood Onchain" },
+  // Dinari DShareFactory, production — github.com/dinaricrypto/sbt-contracts releases/v0.4.0/dshare_factory.json
+  { network: "ethereum", address: "0x60b5e7eecb2aee0382db86491b8cffa39347c747", label: "Dinari dShares" },
+  { network: "arbitrum", address: "0xb4ca72ea4d072c779254269fd56093d3adf603b8", label: "Dinari dShares" },
+  { network: "base", address: "0xbce6410a175a1c9b1a25d38d7e1a900f8393bc4d", label: "Dinari dShares" },
+  { network: "blast", address: "0x6aa1bda7e764bc62589e64f371a4022b80b3c72a", label: "Dinari dShares" },
+];
+const SEED_MARKER = "custodians_seeded_v1";
 let cache: { at: number; map: Promise<Map<string, string>> } | null = null;
 
 /** CUSTODIAN_DEPLOYERS="network:0xaddress:Label,..." — seeds the registry at startup. */
@@ -21,6 +37,23 @@ export function parseCustodianSeed(value: string | undefined): CustodianRecord[]
 }
 
 export const custodianRepository = {
+  /** Adds BUILTIN_CUSTODIANS the first time the bot starts; afterwards the registry is the admins'. */
+  async seedBuiltinsOnce(): Promise<number> {
+    const { rowCount } = await pool.query(
+      `INSERT INTO app_meta (key, value) VALUES ($1, 'done') ON CONFLICT (key) DO NOTHING`,
+      [SEED_MARKER],
+    );
+    if ((rowCount ?? 0) === 0) return 0;
+    for (const c of BUILTIN_CUSTODIANS) {
+      await pool.query(
+        `INSERT INTO custodians (network, address, label) VALUES ($1, lower($2), $3) ON CONFLICT (network, address) DO NOTHING`,
+        [c.network, c.address, c.label],
+      );
+    }
+    cache = null;
+    return BUILTIN_CUSTODIANS.length;
+  },
+
   async upsert(network: NetworkKey, address: string, label: string): Promise<void> {
     await pool.query(
       `INSERT INTO custodians (network, address, label) VALUES ($1, lower($2), $3)

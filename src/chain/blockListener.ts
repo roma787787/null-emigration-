@@ -286,7 +286,14 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
   const traced = autoDiscovery && env.ENABLE_FACTORY_TRACE_DETECTION ? await findBlockCreates(client, network, blockNumber) : null;
   const seen = new Set<string>();
 
-  const dispatch = async (contractAddress: Address, creator: Address, txHash: `0x${string}`, input: `0x${string}`, via?: string) => {
+  const dispatch = async (
+    contractAddress: Address,
+    creator: Address,
+    txHash: `0x${string}`,
+    input: `0x${string}`,
+    via?: string,
+    createdBy?: Address,
+  ) => {
     const key = contractAddress.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -299,13 +306,18 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
     }
     if (!handlers.untracked) return;
     noteCreationSeen(network);
-    await handlers.untracked({ ...event, custodianLabel: await custodianRepository.labelFor(network, creator) });
+    // A custodian is recognised by the wallet sending the tx or by the factory
+    // contract that ran the CREATE (e.g. Dinari's DShareFactory).
+    const custodianLabel =
+      (await custodianRepository.labelFor(network, creator)) ??
+      (createdBy ? await custodianRepository.labelFor(network, createdBy) : null);
+    await handlers.untracked({ ...event, custodianLabel });
   };
 
   if (traced) {
     for (const create of traced) {
       const creator = senderOf.get(create.txHash);
-      if (creator) await dispatch(create.address, creator, create.txHash, create.input, "trace");
+      if (creator) await dispatch(create.address, creator, create.txHash, create.input, "trace", create.createdBy);
     }
   }
 

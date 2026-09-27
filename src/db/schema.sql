@@ -100,3 +100,11 @@ CREATE TABLE IF NOT EXISTS custodians (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (network, address)
 );
+
+-- One-off markers (e.g. "built-in custodians seeded"), so a seed runs once
+-- and an admin's later /remove_custodian sticks across restarts.
+CREATE TABLE IF NOT EXISTS app_meta (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

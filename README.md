@@ -168,14 +168,17 @@ find migrations. For every block on every enabled network:
    ERC-20s whose only "swap" is fee plumbing (`swapTokensForEth`), contracts
    that reference no other token.
 3. **Token A / Token B by address only** — every ERC-20 the contract returns
-   from zero-argument getters or takes in its constructor. Old vs new is
+   from zero-argument getters, takes in its constructor, or has compiled into
+   its code (constants and `immutable`s, e.g. Aave's `LEND`/`AAVE`). Old vs new is
    decided from names (`oldToken`/`newToken`, `migrateFromLEND` → `LEND()`,
    `mkrToSky` → `mkr()`/`sky()`); a token with `migrate()` is itself Token B;
    when names don't tell, the token with a market is Token A. Wrapped native
    and stablecoins are never Token A. Symbols are only displayed — never
    matched — so same-ticker tokens on other chains can't be confused. A
    target given only as a ticker (e.g. `newTokenSymbol()`) is shown as
-   **Unverified** and the alert is LOW.
+   **Unverified** and the alert is LOW. A migrator deployed empty (tokens
+   set by a later `setTokens()`/`initialize()`) or a proxy deployed without
+   its implementation is re-checked on the `RECHECK_DELAYS_SEC` schedule.
 4. **Liquidity test (OKX DEX aggregator, `GET /api/v6/dex/aggregator/quote`)**
    — a quote for $300 then $1,000 of the network's dollar stablecoin into
    Token A. PASS = `code == 0`, a route, and price impact within the chat's
@@ -190,11 +193,16 @@ find migrations. For every block on every enabled network:
 **RWA / tokenized stocks.** `isin()`, `cusip()`, `underlyingAsset()` and
 `issuer()` getters are recognised and shown on the card. Deployers of
 tokenized stocks (Backed Finance, Dinari, Robinhood...) can be registered as
-custodians with `/add_custodian` (or `CUSTODIAN_DEPLOYERS`); their
-migration-style deployments are alerted without the DEX test, since
-tokenized stocks don't trade on DEXes at launch. No addresses are
-pre-seeded — add the verified deployer addresses (e.g. the one labelled
-"Robinhood: Deployer" on Arbiscan).
+custodians with `/add_custodian` (or `CUSTODIAN_DEPLOYERS`), matched by the
+wallet sending the transaction or by the factory contract that ran the
+CREATE; their migration-style deployments are alerted without the DEX test,
+since tokenized stocks don't trade on DEXes at launch. Seeded once on first
+start (then the registry is the admins'): Robinhood's stock-token deployer on
+Arbitrum (`0xcBdF…f556`, Arbiscan label "Robinhood: Deployer") and Dinari's
+production `DShareFactory` on Ethereum, Arbitrum, Base and Blast (from
+`dinaricrypto/sbt-contracts` releases/v0.4.0). Backed Finance (xStocks) isn't
+seeded — its factory address couldn't be confirmed from a public source;
+add it with `/add_custodian`.
 
 **Infrastructure.** Auto-discovery reads every block in full and traces it,
 so it needs WebSocket RPCs with plenty of throughput (the spec asks for
@@ -339,7 +347,16 @@ WETH "migrations" and plain contracts ignored; Strict vs Low-Cap routing;
 OKX outage retried; RWA custodian deployments alerted without a DEX market
 (and the same contract from anyone else not); a `CREATE2` child found via
 `trace_block`; per-token caching of OKX quotes; deploy → alert ≤ 10s; and
-every card valid MarkdownV2 in all three languages.
+every card valid MarkdownV2 in all three languages. It also deploys **real
+production bytecode** pulled from npm by `node e2e/fetch-real-artifacts.cjs`
+(stored in `e2e/real-artifacts.json`): Aave's `LendToAaveMigrator` (found
+with A = LEND, B = AAVE, no `/add_token`), Aave's own proxy deployed empty
+and `initialize()`d later (found on re-check), and Uniswap V2's factory and a
+`createPair` CREATE2 pair (ignored). Plus: tokens only as immutables in the
+code, a migrator configured by a later `setTokens()`, a custodian recognised
+by its factory contract, and a load run — one block with 151 new contracts
+(150 spam: pools, fee tokens, plain tokens, counters) where the one migration
+must alert within 10s and no spam may.
 
 ### Resilience test
 

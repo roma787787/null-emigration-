@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, createWalletClient, http, toFunctionSelector, type Abi, type Address, type Hex } from "viem";
+import { createPublicClient, createWalletClient, getContractAddress, http, toFunctionSelector, type Abi, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { markdownV2Problem } from "./markdownV2.js";
@@ -22,7 +22,7 @@ process.env.RPC_ANVIL ??= "ws://127.0.0.1:8545,http://127.0.0.1:8545";
 process.env.ENABLED_NETWORKS = NETWORK;
 process.env.LOG_LEVEL ??= "fatal";
 process.env.NODE_ENV = "production";
-process.env.RECHECK_DELAYS_SEC = "600";
+process.env.RECHECK_DELAYS_SEC = "3,6,12";
 process.env.AUTO_DISCOVERY = "true";
 
 // --- signature DB stub --------------------------------------------------------------
@@ -30,7 +30,9 @@ const KNOWN = [
   "migrate(uint256)", "oldToken()", "newToken()", "rate()", "token0()", "token1()",
   "swap(uint256,uint256,address,bytes)", "getReserves()", "swapTokensForEth(uint256)", "swapBack()",
   "pairedToken()", "newTokenSymbol()", "isin()", "issuer()", "LEND()", "AAVE()", "migrateFromLEND(uint256)",
-  "LEND_AAVE_RATIO()", "REVISION()", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
+  "LEND_AAVE_RATIO()", "REVISION()", "_totalLendMigrated()", "migrationStarted()", "initialize()",
+  "initialize(address,address,bytes)", "upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()",
+  "admin()", "changeAdmin(address)", "createPair(address,address)", "setTokens(address,address)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
   "name()", "symbol()", "decimals()", "deploy(address,address,bytes32)",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
@@ -99,6 +101,14 @@ const wallet = (key: Hex) => createWalletClient({ account: privateKeyToAccount(k
 const owner = wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
 const stranger = wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
 const custodian = wallet("0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba");
+const spammer = wallet("0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e");
+// Genuine production bytecode from npm (see e2e/fetch-real-artifacts.cjs).
+const real = JSON.parse(readFileSync(fileURLToPath(new URL("./real-artifacts.json", import.meta.url)), "utf8")) as Record<string, Artifact>;
+async function deployReal(from: typeof owner, name: string, args: unknown[] = []) {
+  const { abi, bytecode } = real[name]!;
+  const hash = await from.deployContract({ abi, bytecode, args } as never);
+  return (await chain.waitForTransactionReceipt({ hash })).contractAddress!;
+}
 
 async function deploy(from: typeof owner, name: string, args: unknown[] = []) {
   const { abi, bytecode } = artifacts[name]!;
@@ -161,7 +171,7 @@ function check(label: string, ok: boolean, detail?: unknown) {
 const sent = new Map<string, number>();
 async function deployTimed(from: typeof owner, name: string, args: unknown[] = []) {
   const t0 = Date.now();
-  const address = await deploy(from, name, args);
+  const address = name.startsWith("__real__") ? await deployReal(from, name.slice(8), args) : await deploy(from, name, args);
   sent.set(lower(address), t0);
   return address;
 }
@@ -256,6 +266,57 @@ cases.push({
   expect: expectNone,
 });
 
+// --- real production contracts ---------------------------------------------------------------
+const realLend = await token("EthLend", "LEND");
+const realAave = await token("Aave Token", "AAVE");
+markets.set(lower(realLend), { low: 0.1, strict: 0.4 });
+markets.set(lower(realAave), "noroute"); // the new token has no market yet at migration time
+const lendImpl = await deployTimed(stranger, "__real__LendToAaveMigrator", [realAave, realLend, 100n]);
+cases.push({
+  label: "REAL Aave LendToAaveMigrator (npm bytecode): A = LEND, B = AAVE, found without /add_token",
+  address: lendImpl,
+  expect: expectAlert((r) => (!eq(r.tokenAAddress, realLend) || !eq(r.tokenBAddress, realAave) ? `A ${r.tokenAAddress} B ${r.tokenBAddress}` : null)),
+});
+// Aave's own rollout: an empty InitializableAdminUpgradeabilityProxy first,
+// pointed at the migrator by a later initialize() — caught on re-check.
+const lendProxy = await deployTimed(stranger, "__real__InitializableAdminUpgradeabilityProxy");
+const proxyAbi = real.InitializableAdminUpgradeabilityProxy!.abi;
+await chain.waitForTransactionReceipt({
+  hash: await stranger.writeContract({
+    address: lendProxy, abi: proxyAbi, functionName: "initialize",
+    args: [lendImpl, owner.account.address, toFunctionSelector("initialize()")],
+  } as never),
+});
+cases.push({
+  label: "REAL Aave proxy deployed empty, initialize()d later → found by re-check (A = LEND, B = AAVE)",
+  address: lendProxy,
+  expect: expectAlert((r) => (!eq(r.tokenAAddress, realLend) || !eq(r.tokenBAddress, realAave) ? `A ${r.tokenAAddress} B ${r.tokenBAddress}` : null)),
+});
+const uniFactory = await deployTimed(stranger, "__real__UniswapV2Factory", [stranger.account.address]);
+cases.push({ label: "REAL UniswapV2Factory → ignored", address: uniFactory, expect: expectNone });
+const pairAddress = (await chain.simulateContract({ account: stranger.account, address: uniFactory, abi: real.UniswapV2Factory!.abi, functionName: "createPair", args: [oldTwin, realLend] })).result as Address;
+sent.set(lower(pairAddress), Date.now());
+await chain.waitForTransactionReceipt({ hash: await stranger.writeContract({ address: uniFactory, abi: real.UniswapV2Factory!.abi, functionName: "createPair", args: [oldTwin, realLend] } as never) });
+cases.push({ label: "REAL UniswapV2Pair created via CREATE2 by the factory → ignored (a pool, both tokens liquid)", address: pairAddress, expect: expectNone });
+
+// Tokens only inside the code (immutables read from a registry): the bytecode scan finds them.
+const registry = await deploy(stranger, "TokenRegistry", [oldTwin, newToken2]);
+cases.push({
+  label: "tokens only as immutables in the bytecode (no getters, not in ctor args) → found from the code",
+  address: await deployTimed(stranger, "HardcodedMigrator", [registry]),
+  expect: expectAlert((r) => (!eq(r.tokenAAddress, oldTwin) || !eq(r.tokenBAddress, newToken2) || r.tokenBSource !== "bytecode" ? `A ${r.tokenAAddress} B ${r.tokenBAddress} via ${r.tokenBSource}` : null)),
+});
+// Deployed empty, tokens set by a later tx: re-check picks it up.
+const late = await deployTimed(stranger, "LateConfiguredMigrator");
+await chain.waitForTransactionReceipt({
+  hash: await stranger.writeContract({ address: late, abi: artifacts.LateConfiguredMigrator!.abi, functionName: "setTokens", args: [oldTwin, newToken] } as never),
+});
+cases.push({
+  label: "migrator deployed empty, setTokens() called later → found by re-check",
+  address: late,
+  expect: expectAlert((r) => (!eq(r.tokenAAddress, oldTwin) || !eq(r.tokenBAddress, newToken) ? `A ${r.tokenAAddress} B ${r.tokenBAddress}` : null)),
+});
+
 // CREATE2 via a factory, called by an untracked wallet: found through the block trace.
 const factory = await deploy(stranger, "MigratorFactory");
 const salt = ("0x" + "22".repeat(32)) as Hex;
@@ -268,6 +329,20 @@ cases.push({
   label: "CREATE2 child of a factory called by an untracked wallet (block trace)",
   address: predicted,
   expect: expectAlert((r) => (!eq(r.tokenAAddress, oldTwin) ? `A ${r.tokenAAddress}` : null)),
+});
+
+// A custodian registered by its FACTORY contract (Dinari's DShareFactory shape): whoever
+// calls it, what it creates is the custodian's — and skips the DEX test.
+const custodianFactory = await deploy(stranger, "MigratorFactory");
+await custodianRepository.upsert(NETWORK, custodianFactory, "Factory Custodian");
+const salt2 = ("0x" + "33".repeat(32)) as Hex;
+const viaCustodianFactory = (await chain.simulateContract({ account: stranger.account, address: custodianFactory, abi: factoryAbi, functionName: "deploy", args: [illiquid, newToken, salt2] })).result as Address;
+sent.set(lower(viaCustodianFactory), Date.now());
+await chain.waitForTransactionReceipt({ hash: await stranger.writeContract({ address: custodianFactory, abi: factoryAbi, functionName: "deploy", args: [illiquid, newToken, salt2] } as never) });
+cases.push({
+  label: "custodian registered by its factory contract (Dinari DShareFactory shape): child alerted as custodian",
+  address: viaCustodianFactory,
+  expect: expectAlert((r) => (r.discovery !== "custodian" || r.custodianLabel !== "Factory Custodian" ? `discovery ${r.discovery} ${r.custodianLabel}` : null)),
 });
 
 // --- wait & report ------------------------------------------------------------------------------
@@ -297,7 +372,8 @@ check("tracked-project alerts ignore the auto toggle and liquidity level", !!tra
 const twinRequests = okxRequests.get(lower(oldTwin)) ?? 0;
 check(`OKX results cached per token: OLD-twin used by 6 contracts, ${twinRequests} quote request(s) (≤ 2: $300 + $1,000)`, twinRequests <= 2 && twinRequests > 0, twinRequests);
 check("every OKX request carried the signed OK-ACCESS-* headers", okxSignedOk);
-const latencies = cases.flatMap((c) => {
+const viaRecheck = new Set([lower(lendProxy), lower(late)]); // found on re-check by design, seconds later
+const latencies = cases.filter((c) => !viaRecheck.has(lower(c.address))).flatMap((c) => {
   const a = alerts.get(lower(c.address));
   const s = sent.get(lower(c.address));
   return a && s ? [(a.at - s) / 1000] : [];
@@ -321,6 +397,39 @@ const cardProblems = [...alerts.values()].flatMap(({ record }) =>
 check(`all ${alerts.size} cards (auto, custodian, Unverified, tracked) are valid MarkdownV2 in 3 languages`, cardProblems.length === 0, cardProblems);
 if (firstRec) console.log("\n=== SAMPLE AUTO CARD (uk) ===\n" + formatMigrationAlert(null, firstRec, "uk"));
 if (rwaRec) console.log("\n=== SAMPLE CUSTODIAN CARD (en) ===\n" + formatMigrationAlert(null, rwaRec, "en"));
+
+// --- load: one block with 150 new contracts, one of them a migration ---------------------------
+console.log("\n=== load: 151 contracts in one block ===");
+const anvilRpc = (method: string, params: unknown[] = []) => chain.request({ method, params } as never);
+await anvilRpc("evm_setBlockGasLimit", ["0x1dcd6500"]); // 500M: room for 151 deployments
+await anvilRpc("evm_setIntervalMining", [0]);
+await anvilRpc("evm_setAutomine", [false]);
+const spamKinds: Array<[string, unknown[]]> = [["Counter", []], ["FakePair", [oldTwin, newToken]], ["FeeToken", [oldTwin]], ["SimpleToken", ["Spam", "SPAM", 1n]]];
+let nonce = await chain.getTransactionCount({ address: spammer.account.address, blockTag: "pending" });
+const spamAddresses: string[] = [];
+for (let i = 0; i < 150; i++) {
+  const [name, args] = spamKinds[i % spamKinds.length]!;
+  const { abi, bytecode } = artifacts[name]!;
+  await spammer.deployContract({ abi, bytecode, args, nonce, gas: 3_000_000n } as never);
+  spamAddresses.push(lower(getContractAddress({ from: spammer.account.address, nonce: BigInt(nonce) })));
+  nonce++;
+}
+const { abi: mAbi, bytecode: mCode } = artifacts.MigratorWithGetters!;
+const loadMigratorHash = await stranger.deployContract({ abi: mAbi, bytecode: mCode, args: [oldTwin, newToken], gas: 3_000_000n } as never);
+await anvilRpc("evm_mine");
+const minedAt = Date.now();
+await anvilRpc("evm_setAutomine", [true]);
+await anvilRpc("evm_setIntervalMining", [1]);
+const loadReceipt = await chain.waitForTransactionReceipt({ hash: loadMigratorHash });
+const loadBlock = await chain.getBlock({ blockNumber: loadReceipt.blockNumber });
+const loadMigrator = lower(loadReceipt.contractAddress!);
+while (!alerts.has(loadMigrator) && Date.now() - minedAt < 30_000) await new Promise((r) => setTimeout(r, 100));
+const loadLatency = alerts.has(loadMigrator) ? (alerts.get(loadMigrator)!.at - minedAt) / 1000 : Infinity;
+await new Promise((r) => setTimeout(r, 5000));
+const spamAlerts = spamAddresses.filter((a) => alerts.has(a)).length;
+check(`the block really holds ${loadBlock.transactions.length} deployments`, loadBlock.transactions.length >= 151, loadBlock.transactions.length);
+check(`the migration among them alerted ${loadLatency.toFixed(1)}s after the block was mined (≤ 10s)`, loadLatency <= 10, loadLatency);
+check(`spam filtered: ${spamAlerts} alerts out of 150 spam contracts (pools, fee tokens, plain tokens, counters)`, spamAlerts === 0, spamAlerts);
 
 await stop();
 console.log(failures === 0 ? "\nALL PASSED" : `\n${failures} FAILURE(S)`);

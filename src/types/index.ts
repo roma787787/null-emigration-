@@ -88,7 +88,7 @@ export interface ChatSettingsRecord {
   createdAt: Date;
 }
 
-export type TokenBSource = "constructor_args" | "static_call" | "token_a_match" | "contract_itself";
+export type TokenBSource = "constructor_args" | "static_call" | "token_a_match" | "contract_itself" | "bytecode";
 
 export interface MigrationAnalysisResult {
   /** Which of the candidate Token A addresses the contract was attributed to (null if none given). */

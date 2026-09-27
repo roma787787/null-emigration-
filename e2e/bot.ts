@@ -335,6 +335,14 @@ check(
   has(textsTo(r, ALICE), new RegExp(`АНАЛІЗ КОНТРАКТУ[\\s\\S]*${newToken.address}[\\s\\S]*HIGH`, "i")),
   textsTo(r, ALICE),
 );
+const strangerWallet = wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+const byStranger = await deploy(strangerWallet, "MigratorWithGetters", [newToken.address, oldToken.address]);
+r = await send(ALICE, `/analyze anvil ${byStranger.hash}`);
+check(
+  "/analyze of an untracked deploy with no Token A given reads Token A from the contract (auto-discovery path)",
+  has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}[\\s\\S]*Ліквідність`, "i")),
+  textsTo(r, ALICE),
+);
 r = await send(ALICE, "/status");
 check("/status is refused for a non-admin", has(textsTo(r, ALICE), /лише адміністраторам/), textsTo(r, ALICE));
 

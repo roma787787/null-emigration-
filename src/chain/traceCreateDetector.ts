@@ -5,6 +5,8 @@ import { logger } from "../utils/logger.js";
 export interface TracedCreate {
   address: Address;
   input: `0x${string}`;
+  /** The account that executed the CREATE — the factory contract for factory deployments. */
+  createdBy?: Address;
 }
 
 interface CallFrame {
@@ -18,7 +20,11 @@ interface CallFrame {
 
 function collectCreates(frame: CallFrame, out: TracedCreate[]): void {
   if ((frame.type === "CREATE" || frame.type === "CREATE2") && frame.to && !frame.error) {
-    out.push({ address: getAddress(frame.to), input: (frame.input ?? "0x") as `0x${string}` });
+    out.push({
+      address: getAddress(frame.to),
+      input: (frame.input ?? "0x") as `0x${string}`,
+      createdBy: frame.from ? getAddress(frame.from) : undefined,
+    });
   }
   for (const child of frame.calls ?? []) {
     collectCreates(child, out);
@@ -101,9 +107,7 @@ export async function findFactoryCreatedContracts(
 
 // --- whole-block tracing (auto-discovery) -----------------------------------------
 
-export interface BlockCreate {
-  address: Address;
-  input: `0x${string}`;
+export interface BlockCreate extends TracedCreate {
   txHash: `0x${string}`;
 }
 
@@ -121,7 +125,7 @@ export function blockTraceStatus(network: NetworkKey): "on" | "unavailable" | "u
 interface ParityTrace {
   type: string;
   transactionHash?: string;
-  action?: { init?: string };
+  action?: { init?: string; from?: string };
   result?: { address?: string } | null;
   error?: string;
 }
@@ -154,6 +158,7 @@ async function traceWith(
         address: getAddress(t.result.address),
         input: (t.action?.init ?? "0x") as `0x${string}`,
         txHash: t.transactionHash as `0x${string}`,
+        createdBy: t.action?.from ? getAddress(t.action.from) : undefined,
       });
     }
   }

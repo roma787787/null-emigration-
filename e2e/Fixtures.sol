@@ -270,3 +270,32 @@ contract RwaMigrator {
     constructor(address a, address b) { oldToken = a; newToken = b; issuer = msg.sender; }
     function migrate(uint256) external {}
 }
+
+/// Where a migrator reads its tokens from at construction.
+contract TokenRegistry {
+    address public oldOne;
+    address public newOne;
+    constructor(address a, address b) { oldOne = a; newOne = b; }
+}
+
+/// Tokens only as private immutables (spliced into the runtime code): no
+/// getters, not in its own constructor args — only the bytecode tells.
+contract HardcodedMigrator {
+    address private immutable OLD;
+    address private immutable NEW;
+    constructor(TokenRegistry r) { OLD = r.oldOne(); NEW = r.newOne(); }
+    function migrate(uint256 amount) external {
+        SimpleToken(OLD).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(NEW).transfer(msg.sender, amount);
+    }
+}
+
+/// Deployed empty, pointed at its tokens by a later transaction.
+contract LateConfiguredMigrator {
+    address public oldToken;
+    address public newToken;
+    address private admin;
+    constructor() { admin = msg.sender; }
+    function setTokens(address a, address b) external { require(msg.sender == admin); oldToken = a; newToken = b; }
+    function migrate(uint256) external {}
+}

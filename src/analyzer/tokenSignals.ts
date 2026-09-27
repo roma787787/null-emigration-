@@ -31,6 +31,16 @@ export function isLiquidityPool(selectors: Hex[]): boolean {
   return POOL_SELECTORS.every((s) => selectors.includes(s));
 }
 
+// Upgradeable-proxy entry points: a proxy that has them but no implementation
+// yet is only half deployed; what it will become is decided by a later call.
+const PROXY_SELECTORS = ["upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()"].map((sig) =>
+  toFunctionSelector(sig),
+);
+
+export function looksLikeProxy(selectors: Hex[]): boolean {
+  return PROXY_SELECTORS.some((s) => selectors.includes(s));
+}
+
 const STRING_ABI = [{ type: "function", name: "f", inputs: [], outputs: [{ type: "string" }], stateMutability: "view" }] as const;
 const SYMBOL_GETTER = /symbol|ticker/i;
 const PRINTABLE = /^[\x20-\x7E]{1,32}$/;

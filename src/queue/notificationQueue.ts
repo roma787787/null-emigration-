@@ -7,7 +7,7 @@ import { tokenRepository } from "../db/repositories/tokenRepository.js";
 import { recheckOutcome } from "../analyzer/recheck.js";
 import { env } from "../config/env.js";
 import type { TrackedContractCreationEvent, UntrackedContractCreationEvent } from "../chain/blockListener.js";
-import { analyzeAutoCandidate } from "../analyzer/autoAnalyzer.js";
+import { analyzeAutoCandidate, sourceOf } from "../analyzer/autoAnalyzer.js";
 import { checkLiquidityLevels, isOkxConfigured, type LiquidityCheck } from "../liquidity/okxLiquidity.js";
 import { noteAutoAlert, noteCandidate, noteLiquiditySkip, noteSkipped } from "../chain/autoStats.js";
 import { getPublicClient } from "../chain/provider.js";
@@ -224,6 +224,8 @@ export interface AutoJobData {
   blockNumber: string;
   input: `0x${string}`;
   custodianLabel: string | null;
+  /** For "auto-recheck" jobs: index into RECHECK_DELAYS_SEC. */
+  attempt?: number;
 }
 
 let autoQueue: Queue<AutoJobData> | undefined;
@@ -247,6 +249,24 @@ export async function enqueueAutoCandidate(event: UntrackedContractCreationEvent
     },
     {
       jobId: `${event.network}-${event.contractAddress.toLowerCase()}`,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 3_000 },
+      removeOnComplete: 5000,
+      removeOnFail: 1000,
+    },
+  );
+}
+
+/** Looks at a not-yet-configured contract again later (tokens / implementation set after deploy). */
+async function scheduleAutoRecheck(data: AutoJobData, attempt: number): Promise<void> {
+  const delaySec = env.RECHECK_DELAYS_SEC[attempt];
+  if (delaySec === undefined) return;
+  await getAutoDiscoveryQueue().add(
+    "auto-recheck",
+    { ...data, attempt },
+    {
+      jobId: `${data.network}-${data.contractAddress.toLowerCase()}-autorecheck-${attempt}`,
+      delay: delaySec * 1000,
       attempts: 3,
       backoff: { type: "exponential", delay: 3_000 },
       removeOnComplete: 5000,
@@ -279,6 +299,7 @@ export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration)
       const outcome = await analyzeAutoCandidate(data.network, data.contractAddress, data.input);
       if (outcome.kind === "skipped") {
         noteSkipped(data.network, outcome.reason);
+        if (outcome.recheck) await scheduleAutoRecheck(data, job.name === "auto-recheck" ? (data.attempt ?? 0) + 1 : 0);
         return;
       }
       noteCandidate(data.network);
@@ -298,8 +319,8 @@ export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration)
               tokenAAddress: result.alternateTokenA,
               tokenASymbol: await readTokenSymbol(client, result.alternateTokenA),
               tokenBAddress: result.tokenAAddress,
-              tokenBSource: result.tokenAGetter === "constructor" ? "constructor_args" : "static_call",
-              matchedGetter: result.tokenAGetter === "constructor" ? null : result.tokenAGetter,
+              tokenBSource: sourceOf(result.tokenAGetter),
+              matchedGetter: sourceOf(result.tokenAGetter) === "static_call" ? result.tokenAGetter : null,
             };
             liquidity = alt;
           }

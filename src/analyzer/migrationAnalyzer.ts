@@ -65,7 +65,7 @@ export function computeConfidenceScore(confidence: ConfidenceLevel, input: Score
 
   if (input.tokenBSource === "static_call") evidence += 45;
   else if (input.tokenBSource === "contract_itself") evidence += 40;
-  else if (input.tokenBSource === "constructor_args") evidence += 35;
+  else if (input.tokenBSource === "constructor_args" || input.tokenBSource === "bytecode") evidence += 35;
   else if (input.tokenBSource === "token_a_match") evidence += 20;
 
   evidence += Math.min(input.strongFunctionCount, 2) * 15;
@@ -83,6 +83,8 @@ const ERC20_CORE = ["totalSupply()", "balanceOf(address)", "transfer(address,uin
 
 export interface ContractInspection {
   client: PublicClient;
+  /** Implementation behind an EIP-1967 / beacon / clone proxy, if one is set. */
+  implementation: Address | null;
   proxyCode: Hex | undefined;
   implementationCode: Hex | undefined;
   /** Proxy + implementation code, scanned together. */
@@ -144,7 +146,7 @@ export async function inspectContract(network: NetworkKey, contractAddress: Addr
   }
   const matchedEvents = bytecode ? scanBytecodeForMigrationEvents(bytecode) : [];
 
-  return { client, proxyCode, implementationCode, bytecode, selectors, signatures, isToken, strong, weak, matchedEvents };
+  return { client, implementation, proxyCode, implementationCode, bytecode, selectors, signatures, isToken, strong, weak, matchedEvents };
 }
 
 export async function analyzeMigrationContract(

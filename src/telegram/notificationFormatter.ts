@@ -18,6 +18,8 @@ function tokenBSourceLabel(lang: Language, migration: MigrationContractRecord): 
       return t(lang, "card.sourceConstructor");
     case "contract_itself":
       return t(lang, "card.sourceSelf");
+    case "bytecode":
+      return t(lang, "card.sourceBytecode");
     default:
       return "";
   }

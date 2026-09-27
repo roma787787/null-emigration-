@@ -34,7 +34,9 @@ async function main() {
     logger.warn("Auto-discovery is on but OKX_API_KEY/OKX_SECRET_KEY/OKX_API_PASSPHRASE are not set: auto-discovered alerts will be held back");
   }
 
-  // Known RWA deployers from CUSTODIAN_DEPLOYERS; more can be added with /add_custodian.
+  // Documented tokenized-stock deployers (Robinhood, Dinari) on first start,
+  // then CUSTODIAN_DEPLOYERS; more can be added with /add_custodian.
+  await custodianRepository.seedBuiltinsOnce();
   for (const c of parseCustodianSeed(process.env.CUSTODIAN_DEPLOYERS)) {
     await custodianRepository.upsert(c.network, c.address, c.label);
   }

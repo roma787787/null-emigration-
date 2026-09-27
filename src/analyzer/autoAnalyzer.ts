@@ -1,4 +1,4 @@
-import { isAddressEqual, type Address } from "viem";
+import { getAddress, isAddressEqual, type Address } from "viem";
 import type { MigrationAnalysisResult, NetworkKey, TokenBSource } from "../types/index.js";
 import { isBaseAsset } from "../config/marketAssets.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
@@ -6,7 +6,8 @@ import { computeConfidence, computeConfidenceScore, inspectContract } from "./mi
 import { collectTokenGetters, isErc20, targetRank, type TokenReference } from "./genericTokenProbe.js";
 import { extractAddressCandidatesFromConstructorArgs } from "./constructorArgsDecoder.js";
 import { probeAuxiliarySignals } from "./staticCallProbe.js";
-import { findRwaSignals, findSymbolOnlyTokenB, hasOldTokenGetter, isLiquidityPool } from "./tokenSignals.js";
+import { extractAddressConstants } from "./bytecodeSelectors.js";
+import { findRwaSignals, findSymbolOnlyTokenB, hasOldTokenGetter, isLiquidityPool, looksLikeProxy } from "./tokenSignals.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -25,7 +26,10 @@ export interface AutoAnalysisResult extends MigrationAnalysisResult {
   alternateTokenA: Address | null;
 }
 
-export type AutoAnalysisOutcome = { kind: "candidate"; result: AutoAnalysisResult } | { kind: "skipped"; reason: string };
+export type AutoAnalysisOutcome =
+  | { kind: "candidate"; result: AutoAnalysisResult }
+  /** `recheck`: may still become a migration once configured (tokens set later, proxy implementation set later). */
+  | { kind: "skipped"; reason: string; recheck?: boolean };
 
 // On a contract that is itself an ERC-20, only these names mean migration —
 // swap/exchange there are fee-swap plumbing (swapTokensForEth, swapBack).
@@ -33,6 +37,11 @@ const TOKEN_MIGRATION_NAME = /migrat|convert/i;
 const OLD_NAME = /old|legacy|prev|from|v1|source/i;
 const FROM_X = /from([A-Za-z0-9]+)/i;
 const X_TO_Y = /^([a-z][a-z0-9]*)To([A-Z][A-Za-z0-9]*)$/;
+
+/** Where a token reference came from, as a Token B source. */
+export function sourceOf(label: string): TokenBSource {
+  return label === "constructor" ? "constructor_args" : label === "bytecode" ? "bytecode" : "static_call";
+}
 
 const nameOf = (signature: string) => signature.split("(")[0] ?? "";
 const labelIs = (ref: TokenReference, name: string) => ref.labels.some((l) => l.toLowerCase() === name.toLowerCase());
@@ -73,9 +82,12 @@ export async function analyzeAutoCandidate(
   creationInput: `0x${string}` | string,
 ): Promise<AutoAnalysisOutcome> {
   const inspection = await inspectContract(network, contractAddress);
-  const { client, proxyCode, selectors, signatures, isToken, strong, matchedEvents } = inspection;
+  const { client, proxyCode, selectors, signatures, isToken, strong, matchedEvents, implementation } = inspection;
   if (!proxyCode || proxyCode === "0x") return { kind: "skipped", reason: "no code" };
   if (isLiquidityPool(selectors)) return { kind: "skipped", reason: "liquidity pool" };
+  if (!implementation && looksLikeProxy(selectors) && strong.length === 0) {
+    return { kind: "skipped", reason: "proxy without implementation", recheck: true };
+  }
 
   const migrationFunctions = isToken ? strong.filter((s) => TOKEN_MIGRATION_NAME.test(nameOf(s))) : strong;
   const oldGetter = hasOldTokenGetter(selectors);
@@ -91,8 +103,17 @@ export async function analyzeAutoCandidate(
     if (isAddressEqual(address, contractAddress) || fromGetters.some((r) => isAddressEqual(r.address, address))) continue;
     if (await isErc20(client, address)) fromConstructor.push({ address, labels: ["constructor"] });
   }
-  const refs = [...fromGetters, ...fromConstructor].filter((r) => !isBaseAsset(network, r.address));
-  if (refs.length === 0) return { kind: "skipped", reason: "no token referenced" };
+  // Addresses compiled into the code (constants, immutables) of the contract
+  // or its implementation — tokens a migrator uses but exposes no getter for.
+  const fromBytecode: TokenReference[] = [];
+  const known = [contractAddress, ...fromGetters.map((r) => r.address), ...fromConstructor.map((r) => r.address)];
+  for (const address of extractAddressConstants(inspection.bytecode)) {
+    if (known.some((k) => isAddressEqual(k, address as Address))) continue;
+    if (await isErc20(client, getAddress(address))) fromBytecode.push({ address: getAddress(address), labels: ["bytecode"] });
+  }
+  const refs = [...fromGetters, ...fromConstructor, ...fromBytecode].filter((r) => !isBaseAsset(network, r.address));
+  // A migrator whose tokens are set by a later call (setTokens / initialize).
+  if (refs.length === 0) return { kind: "skipped", reason: "no token referenced", recheck: true };
 
   const functionNames = migrationFunctions.map(nameOf);
   let tokenA: TokenReference | null;
@@ -108,7 +129,7 @@ export async function analyzeAutoCandidate(
     decided = true;
   } else {
     ({ tokenA, tokenB, decided } = orderTokens(refs, functionNames));
-    if (tokenB) tokenBSource = tokenB.labels[0] === "constructor" ? "constructor_args" : "static_call";
+    if (tokenB) tokenBSource = sourceOf(tokenB.labels[0]!);
   }
   if (!tokenA) return { kind: "skipped", reason: "no token referenced" };
 
