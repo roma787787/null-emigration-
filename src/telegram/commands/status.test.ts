@@ -39,6 +39,54 @@ const report: StatusReport = {
         lastErrorAt: new Date(now - 90_000),
       },
     },
+    {
+      // Sparse chain: no new block for minutes, but fully caught up.
+      network: "polygon-zkevm",
+      head: 500n,
+      trace: "on",
+      listener: {
+        mode: "polling",
+        startedAt: new Date(now - 3600_000),
+        lastProcessedBlock: 500n,
+        lastProcessedAt: new Date(now - 4 * 60_000),
+        skippedBlocks: 0,
+        failedBlocks: 0,
+        lastError: null,
+        lastErrorAt: null,
+      },
+    },
+    {
+      // Just restarted: resumed from its cursor, no new block yet.
+      network: "linea",
+      head: 700n,
+      trace: "on",
+      listener: {
+        mode: "polling",
+        startedAt: new Date(now - 14_000),
+        lastProcessedBlock: 700n,
+        lastProcessedAt: null,
+        skippedBlocks: 0,
+        failedBlocks: 0,
+        lastError: null,
+        lastErrorAt: null,
+      },
+    },
+    {
+      // Stuck far behind the head.
+      network: "arbitrum",
+      head: 100_000n,
+      trace: "on",
+      listener: {
+        mode: "polling",
+        startedAt: new Date(now - 3600_000),
+        lastProcessedBlock: 50_000n,
+        lastProcessedAt: new Date(now - 30 * 60_000),
+        skippedBlocks: 0,
+        failedBlocks: 0,
+        lastError: null,
+        lastErrorAt: null,
+      },
+    },
     { network: "bsc", head: 1n, trace: "off", listener: undefined },
   ],
 };
@@ -64,4 +112,11 @@ test("flags a stalled network with its problems, and a missing listener", () => 
   assert.match(text, /failed blocks: 2/);
   assert.match(text, /last error 1m ago: HTTP request failed\.$/m);
   assert.match(text, /🔴 bsc · listener not running/);
+});
+
+test("judges health by lag: sparse and just-resumed chains are green, a stuck one red", () => {
+  const text = formatStatus("en", report, now);
+  assert.match(text, /🟢 polygon-zkevm · polling · block 500 · lag 0 · 4m ago/);
+  assert.match(text, /🟢 linea · polling · block 700 · lag 0 · factory trace: on/);
+  assert.match(text, /🔴 arbitrum · polling · block 50000 · lag 50000/);
 });

@@ -33,6 +33,11 @@ export const ownerRepository = {
     return toOwnerRecord(row);
   },
 
+  async anyExists(): Promise<boolean> {
+    const { rows } = await pool.query(`SELECT 1 FROM token_owners LIMIT 1`);
+    return rows.length > 0;
+  },
+
   async listForToken(tokenId: number): Promise<TokenOwnerRecord[]> {
     const { rows } = await pool.query<OwnerRow>(`SELECT * FROM token_owners WHERE token_id = $1 ORDER BY id`, [
       tokenId,

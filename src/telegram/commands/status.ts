@@ -12,8 +12,13 @@ import { isAdminChat } from "../accessControl.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 const HEAD_TIMEOUT_MS = 4_000;
-const HEALTHY_WITHIN_MS = 2 * 60 * 1000;
-const STALE_WITHIN_MS = 10 * 60 * 1000;
+const RECENT_MS = 2 * 60 * 1000;
+const STALE_MS = 10 * 60 * 1000;
+// Lag is judged in blocks, not by time since the last block: sparse chains
+// (Polygon zkEVM, Linea when idle) can go minutes without a block while the
+// listener is perfectly caught up.
+const HEALTHY_LAG = 30n;
+const CATCHING_UP_LAG = 1000n;
 
 export interface NetworkReport {
   network: NetworkKey;
@@ -44,19 +49,23 @@ function networkLine(lang: Language, report: NetworkReport, now: number): string
   if (!listener) return `🔴 ${report.network} · ${t(lang, "status.notStarted")}`;
 
   const sinceLast = listener.lastProcessedAt ? now - listener.lastProcessedAt.getTime() : Infinity;
-  const icon = sinceLast <= HEALTHY_WITHIN_MS ? "🟢" : sinceLast <= STALE_WITHIN_MS ? "🟡" : "🔴";
+  const sinceStart = now - listener.startedAt.getTime();
+  const block = listener.lastProcessedBlock;
+  const lag = block !== null && report.head !== null ? (report.head > block ? report.head - block : 0n) : null;
+
+  let icon: string;
+  if (block === null) icon = sinceStart <= RECENT_MS ? "🟡" : "🔴";
+  else if (lag === null) icon = sinceLast <= RECENT_MS ? "🟡" : "🔴";
+  else if (lag <= HEALTHY_LAG) icon = "🟢";
+  else icon = lag <= CATCHING_UP_LAG && Math.min(sinceLast, sinceStart) <= STALE_MS ? "🟡" : "🔴";
   const parts = [`${icon} ${report.network}`, listener.mode];
 
-  if (listener.lastProcessedBlock === null || !listener.lastProcessedAt) {
+  if (block === null) {
     parts.push(t(lang, "status.noBlocks"));
   } else {
-    parts.push(t(lang, "status.block", { block: listener.lastProcessedBlock.toString() }));
-    parts.push(
-      report.head === null
-        ? t(lang, "status.headUnknown")
-        : t(lang, "status.lag", { lag: (report.head > listener.lastProcessedBlock ? report.head - listener.lastProcessedBlock : 0n).toString() }),
-    );
-    parts.push(t(lang, "status.ago", { ago: formatDuration(sinceLast) }));
+    parts.push(t(lang, "status.block", { block: block.toString() }));
+    parts.push(lag === null ? t(lang, "status.headUnknown") : t(lang, "status.lag", { lag: lag.toString() }));
+    if (listener.lastProcessedAt) parts.push(t(lang, "status.ago", { ago: formatDuration(sinceLast) }));
   }
   const traceState = { on: "status.traceOn", unavailable: "status.traceUnavailable", off: "status.traceOff" }[report.trace];
   parts.push(t(lang, "status.trace", { state: t(lang, traceState) }));

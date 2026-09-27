@@ -39,6 +39,20 @@ export function blockRange(
 
 const CURSOR_SAVE_INTERVAL_MS = 5_000;
 
+// With no tracked wallets at all there's nothing to match, so blocks aren't
+// fetched (saves RPC quota); the answer is cached briefly across networks.
+const OWNERS_CHECK_TTL_MS = 10_000;
+let ownersCheck: { at: number; any: Promise<boolean> } | null = null;
+
+function anyOwnersTracked(): Promise<boolean> {
+  if (!ownersCheck || Date.now() - ownersCheck.at > OWNERS_CHECK_TTL_MS) {
+    const any = ownerRepository.anyExists();
+    ownersCheck = { at: Date.now(), any };
+    any.catch(() => (ownersCheck = null));
+  }
+  return ownersCheck.any;
+}
+
 /**
  * Watches a single network for new blocks and reports contract deployments
  * originating from a tracked owner/deployer address (section 4.2 of the
@@ -90,6 +104,7 @@ export function startBlockListener(
     .get(network)
     .then((cursor) => {
       lastProcessedBlock = savedBlock = cursor;
+      status.lastProcessedBlock = cursor;
       if (cursor !== null) logger.info({ network, cursor: cursor.toString() }, "Resuming from saved block cursor");
     })
     .catch((err) => logger.warn({ err, network }, "Could not load block cursor; starting from the chain head"));
@@ -192,6 +207,7 @@ async function processBlockWithRetry(
 }
 
 async function processBlock(network: NetworkKey, blockNumber: bigint, onContractCreation: ContractCreationHandler) {
+  if (!(await anyOwnersTracked())) return;
   const client = getPublicClient(network);
   const block = await client.getBlock({ blockNumber, includeTransactions: true });
 
