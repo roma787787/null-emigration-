@@ -4,6 +4,8 @@ import type { MigrationContractRecord, NetworkKey, TokenRecord } from "../types/
 import { analyzeMigrationContract } from "../analyzer/migrationAnalyzer.js";
 import { migrationContractRepository } from "../db/repositories/migrationContractRepository.js";
 import { tokenRepository } from "../db/repositories/tokenRepository.js";
+import { recheckOutcome } from "../analyzer/recheck.js";
+import { env } from "../config/env.js";
 import type { TrackedContractCreationEvent } from "../chain/blockListener.js";
 import { logger } from "../utils/logger.js";
 
@@ -23,13 +25,41 @@ export interface ContractCreationJobData {
   tokenId?: number;
 }
 
-let queue: Queue<ContractCreationJobData> | undefined;
+/** A delayed re-analysis of a contract detected without Token B. */
+export interface RecheckJobData {
+  network: NetworkKey;
+  contractAddress: `0x${string}`;
+  input: `0x${string}`;
+  /** Index into RECHECK_DELAYS_SEC. */
+  attempt: number;
+}
 
-export function getContractCreationQueue(): Queue<ContractCreationJobData> {
+type JobData = ContractCreationJobData | RecheckJobData;
+
+let queue: Queue<JobData> | undefined;
+
+export function getContractCreationQueue(): Queue<JobData> {
   if (!queue) {
-    queue = new Queue<ContractCreationJobData>(QUEUE_NAME, { connection: createRedisConnection() });
+    queue = new Queue<JobData>(QUEUE_NAME, { connection: createRedisConnection() });
   }
   return queue;
+}
+
+async function scheduleRecheck(base: Omit<RecheckJobData, "attempt">, attempt: number): Promise<void> {
+  const delaySec = env.RECHECK_DELAYS_SEC[attempt];
+  if (delaySec === undefined) return;
+  await getContractCreationQueue().add(
+    "recheck",
+    { ...base, attempt },
+    {
+      jobId: `${base.network}-${base.contractAddress.toLowerCase()}-recheck-${attempt}`,
+      delay: delaySec * 1000,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 5_000 },
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    },
+  );
 }
 
 export async function enqueueContractCreation(event: TrackedContractCreationEvent): Promise<void> {
@@ -61,13 +91,48 @@ export async function enqueueContractCreation(event: TrackedContractCreationEven
 export interface AnalyzedMigration {
   token: TokenRecord;
   migrationContract: MigrationContractRecord;
+  /** Set when this is a re-check that found more than the first alert showed. */
+  update?: boolean;
+}
+
+/**
+ * Re-analyzes a contract that had no Token B yet: proxies and configurable
+ * migrators usually get their tokens in an initialize()/setToken() call a
+ * few transactions after the deploy. Re-alerts when Token B shows up or the
+ * confidence level rises; keeps re-checking on the RECHECK_DELAYS_SEC
+ * schedule until Token B is found.
+ */
+async function handleRecheck(data: RecheckJobData, onAnalyzed: (result: AnalyzedMigration) => Promise<void>) {
+  const previous = await migrationContractRepository.findByContract(data.network, data.contractAddress);
+  if (!previous || previous.tokenBAddress) return;
+  const token = await tokenRepository.findById(previous.tokenId);
+  if (!token) return;
+
+  const analysis = await analyzeMigrationContract(data.network, data.contractAddress, data.input, [token.address]);
+  const outcome = recheckOutcome(previous, analysis);
+  logger.info(
+    { network: data.network, contractAddress: data.contractAddress, attempt: data.attempt, outcome },
+    "Re-checked contract detected without Token B",
+  );
+
+  if (outcome !== "unchanged") {
+    const updated = await migrationContractRepository.updateAnalysis(previous.id, analysis);
+    if (updated && outcome === "notify") await onAnalyzed({ token, migrationContract: updated, update: true });
+  }
+  if (!analysis.tokenBAddress) {
+    await scheduleRecheck({ network: data.network, contractAddress: data.contractAddress, input: data.input }, data.attempt + 1);
+  }
 }
 
 export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigration) => Promise<void>): Worker {
-  const worker = new Worker<ContractCreationJobData>(
+  const worker = new Worker<JobData>(
     QUEUE_NAME,
-    async (job: Job<ContractCreationJobData>) => {
-      const data = job.data;
+    async (job: Job<JobData>) => {
+      if (job.name === "recheck") {
+        await handleRecheck(job.data as RecheckJobData, onAnalyzed);
+        return;
+      }
+      const data = job.data as ContractCreationJobData;
 
       const alreadySeen = await migrationContractRepository.alreadySeen(data.network, data.contractAddress);
       if (alreadySeen) {
@@ -120,6 +185,10 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
       }
 
       await onAnalyzed({ token, migrationContract });
+
+      if (!migrationContract.tokenBAddress) {
+        await scheduleRecheck({ network: data.network, contractAddress: data.contractAddress, input: data.input }, 0);
+      }
     },
     { connection: createRedisConnection(), concurrency: 4 },
   );

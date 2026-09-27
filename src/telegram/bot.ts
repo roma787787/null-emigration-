@@ -6,12 +6,14 @@ import { registerAddOwnerCommand } from "./commands/addOwner.js";
 import { registerRemoveOwnerCommand } from "./commands/removeOwner.js";
 import { registerSettingsCommand } from "./commands/settings.js";
 import { registerAnalyzeCommand } from "./commands/analyze.js";
+import { registerStatusCommand } from "./commands/status.js";
 import { registerCallbacks } from "./callbacks.js";
 import { registerAccessControl, isAdminChat } from "./accessControl.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
 import { chatSettingsRepository } from "../db/repositories/chatSettingsRepository.js";
 import type { AnalyzedMigration } from "../queue/notificationQueue.js";
-import { DEFAULT_LANGUAGE } from "./i18n/index.js";
+import type { OwnersRefreshed } from "../chain/ownerRefresh.js";
+import { DEFAULT_LANGUAGE, t } from "./i18n/index.js";
 import { logger } from "../utils/logger.js";
 
 export function createBot(token: string): Telegraf {
@@ -27,6 +29,7 @@ export function createBot(token: string): Telegraf {
   registerRemoveOwnerCommand(bot);
   registerSettingsCommand(bot);
   registerAnalyzeCommand(bot);
+  registerStatusCommand(bot);
   registerCallbacks(bot);
 
   bot.catch((err, ctx) => {
@@ -41,7 +44,7 @@ export function createBot(token: string): Telegraf {
  * this network at this confidence level, in that chat's chosen language.
  */
 export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedMigration): Promise<void> {
-  const { token, migrationContract } = analyzed;
+  const { token, migrationContract, update } = analyzed;
   const chats = await chatSettingsRepository.listAll();
 
   for (const chat of chats) {
@@ -49,7 +52,7 @@ export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedM
     if (chat.confidenceFilter === "HIGH_ONLY" && migrationContract.confidence !== "HIGH") continue;
     if (chat.networksFilter && !chat.networksFilter.includes(token.network)) continue;
 
-    const message = formatMigrationAlert(token, migrationContract, chat.language ?? DEFAULT_LANGUAGE);
+    const message = formatMigrationAlert(token, migrationContract, chat.language ?? DEFAULT_LANGUAGE, { update });
 
     try {
       await bot.telegram.sendMessage(chat.chatId, message, {
@@ -59,5 +62,21 @@ export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedM
     } catch (err) {
       logger.error({ err, chatId: chat.chatId }, "Failed to deliver alert to chat");
     }
+  }
+}
+
+/** Tells the chat that added a token which newly discovered wallets are now watched for it. */
+export async function notifyNewOwners(bot: Telegraf, { token, added }: OwnersRefreshed): Promise<void> {
+  const chat = await chatSettingsRepository.ensure(token.addedByChatId);
+  const lang = chat.language ?? DEFAULT_LANGUAGE;
+  const text = t(lang, "owners.refreshedNew", {
+    symbol: token.symbol ?? token.address,
+    network: token.network,
+    owners: added.map((o) => `  • ${o.address} (${o.source})`).join("\n"),
+  });
+  try {
+    await bot.telegram.sendMessage(token.addedByChatId, text);
+  } catch (err) {
+    logger.error({ err, chatId: token.addedByChatId }, "Failed to deliver owner-refresh notice");
   }
 }

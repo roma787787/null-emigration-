@@ -29,6 +29,8 @@ process.env.RPC_ANVIL ??= "ws://127.0.0.1:8545,http://127.0.0.1:8545";
 process.env.ENABLED_NETWORKS = NETWORK;
 process.env.LOG_LEVEL ??= "warn";
 process.env.NODE_ENV = "production";
+// Re-check contracts without Token B every few seconds instead of minutes.
+process.env.RECHECK_DELAYS_SEC = "4,8,12,16,20";
 
 // Local stand-in for the public 4-byte signature DB (same response shape as
 // api.4byte.sourcify.dev), so function-name recognition runs offline too.
@@ -60,6 +62,7 @@ const artifacts = JSON.parse(readFileSync(ARTIFACTS, "utf8")) as Record<string, 
 
 const OWNER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const STRANGER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const NEW_OWNER_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 
 const { runMigrations } = await import("../src/db/migrate.js");
 const { pool } = await import("../src/db/client.js");
@@ -74,11 +77,14 @@ const { formatMigrationAlert } = await import("../src/telegram/notificationForma
 const { analyzeDeployTx } = await import("../src/analyzer/analyzeDeployTx.js");
 const { readTokenSymbol } = await import("../src/chain/tokenMetadata.js");
 const { probeZeroArgTokenGetters } = await import("../src/analyzer/genericTokenProbe.js");
+const { refreshAllOwners } = await import("../src/chain/ownerRefresh.js");
+const { collectStatus, formatStatus } = await import("../src/telegram/commands/status.js");
 
 const rpc = http("http://127.0.0.1:8545");
 const chainClient = createPublicClient({ chain: foundry, transport: rpc });
 const owner = createWalletClient({ account: privateKeyToAccount(OWNER_KEY), chain: foundry, transport: rpc });
 const stranger = createWalletClient({ account: privateKeyToAccount(STRANGER_KEY), chain: foundry, transport: rpc });
+const newOwner = createWalletClient({ account: privateKeyToAccount(NEW_OWNER_KEY), chain: foundry, transport: rpc });
 
 async function deploy(wallet: typeof owner, name: string, args: unknown[] = []): Promise<{ address: Address; hash: Hex }> {
   const { abi, bytecode } = artifacts[name]!;
@@ -89,7 +95,7 @@ async function deploy(wallet: typeof owner, name: string, args: unknown[] = []):
 
 // --- reset state -----------------------------------------------------------
 await runMigrations();
-await pool.query("TRUNCATE tokens, chat_settings RESTART IDENTITY CASCADE");
+await pool.query("TRUNCATE tokens, chat_settings, network_cursors RESTART IDENTITY CASCADE");
 await getContractCreationQueue().obliterate({ force: true });
 
 // --- Token A / Token B, then simulate /add_token ---------------------------
@@ -121,7 +127,15 @@ type Result = { address: string; tokenA: string; getter: string | null; confiden
 const results = new Map<string, Result>();
 const sentAt = new Map<string, number>();
 
-startContractCreationWorker(async ({ token: tk, migrationContract: mc }) => {
+const updates = new Map<string, { tokenB: string | null; confidence: string; card: string }>();
+
+startContractCreationWorker(async ({ token: tk, migrationContract: mc, update }) => {
+  if (update) {
+    updates.set(mc.contractAddress.toLowerCase(), {
+      tokenB: mc.tokenBAddress, confidence: mc.confidence, card: formatMigrationAlert(tk, mc, "ru", { update: true }),
+    });
+    return;
+  }
   results.set(mc.contractAddress.toLowerCase(), {
     address: mc.contractAddress,
     tokenA: tk.address,
@@ -134,7 +148,8 @@ startContractCreationWorker(async ({ token: tk, migrationContract: mc }) => {
     card: formatMigrationAlert(tk, mc, "ru"),
   });
 });
-startBlockListener(NETWORK, (event) => enqueueContractCreation(event));
+const listen = () => startBlockListener(NETWORK, (event) => enqueueContractCreation(event));
+let stopListener = listen();
 await new Promise((r) => setTimeout(r, 1500));
 
 // --- scenarios --------------------------------------------------------------
@@ -302,6 +317,87 @@ for (const check of analyzeChecks) {
   if (problem) failures++;
   console.log(`${problem ? "FAIL" : "ok  "} ${check.label}${problem ? "  <- " + problem : ""}`);
 }
+
+// --- reliability: restart catch-up, re-check, owner refresh, /status ------------
+console.log("\n=== reliability ===");
+const waitFor = async (cond: () => boolean, ms: number) => {
+  const until = Date.now() + ms;
+  while (!cond() && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
+  return cond();
+};
+const reliabilityChecks: Array<[string, string | null]> = [];
+
+// 1. A deploy mined while the bot is down (redeploy/crash) is caught on restart.
+await stopListener();
+const whileDown = await deploy(owner, "MigratorWithGetters", [oldToken.address, newToken.address]);
+const downHead = await chainClient.getBlockNumber();
+while ((await chainClient.getBlockNumber()) < downHead + 3n) await new Promise((r) => setTimeout(r, 200));
+stopListener = listen();
+reliabilityChecks.push([
+  "deploy mined while the listener was stopped is caught after restart",
+  (await waitFor(() => results.has(whileDown.address.toLowerCase()), 20_000)) ? null : "not detected",
+]);
+
+// 2. Logic deployed first (MEDIUM, no Token B) and initialized later -> update alert.
+const { abi: polAbi } = artifacts.PolStyleMigration!;
+const initHash = await owner.writeContract({
+  address: polImpl.address, abi: polAbi, functionName: "initialize", args: [oldToken.address, newToken.address],
+} as never);
+await chainClient.waitForTransactionReceipt({ hash: initHash });
+const polKey = polImpl.address.toLowerCase();
+const gotUpdate = await waitFor(() => updates.has(polKey), 40_000);
+const polUpdate = updates.get(polKey);
+reliabilityChecks.push([
+  "contract initialized after deploy -> re-check sends an update with Token B",
+  !gotUpdate
+    ? "no update alert"
+    : polUpdate!.tokenB?.toLowerCase() !== newToken.address.toLowerCase()
+      ? `update tokenB ${polUpdate!.tokenB}`
+      : null,
+]);
+const spuriousUpdates = [...updates.keys()].filter((a) => a !== polKey);
+reliabilityChecks.push([
+  "re-checks of unchanged contracts send nothing",
+  spuriousUpdates.length ? `unexpected updates: ${spuriousUpdates.join(", ")}` : null,
+]);
+
+// 3. Ownership moves to a new wallet -> periodic refresh links it -> its deploys are caught.
+const { abi: simpleTokenAbi } = artifacts.SimpleToken!;
+const ownHash = await owner.writeContract({
+  address: oldToken.address, abi: simpleTokenAbi, functionName: "transferOwnership", args: [newOwner.account.address],
+} as never);
+await chainClient.waitForTransactionReceipt({ hash: ownHash });
+const refreshed: string[] = [];
+await refreshAllOwners(async ({ token: tk, added }) => {
+  for (const o of added) refreshed.push(`${tk.symbol}:${o.address.toLowerCase()}:${o.source}`);
+});
+reliabilityChecks.push([
+  "owner refresh links the new owner (and only it)",
+  refreshed.join() === `OLD:${newOwner.account.address.toLowerCase()}:owner` ? null : `refresh added [${refreshed.join(", ")}]`,
+]);
+const fromNewOwner = await deploy(newOwner, "MigratorWithGetters", [oldToken.address, newToken.address]);
+const newOwnerCaught = await waitFor(() => results.has(fromNewOwner.address.toLowerCase()), 20_000);
+reliabilityChecks.push([
+  "deploy from the new owner wallet is detected",
+  !newOwnerCaught
+    ? "not detected"
+    : results.get(fromNewOwner.address.toLowerCase())!.tokenA.toLowerCase() !== oldToken.address.toLowerCase()
+      ? "attributed to the wrong token"
+      : null,
+]);
+
+// 4. /status reflects the running listener.
+const statusText = formatStatus("en", await collectStatus());
+reliabilityChecks.push([
+  "/status shows the network as healthy with its block and lag",
+  /🟢 anvil · websocket · block \d+ · lag \d+ · \d+s ago/.test(statusText) ? null : `status:\n${statusText}`,
+]);
+
+for (const [label, problem] of reliabilityChecks) {
+  if (problem) failures++;
+  console.log(`${problem ? "FAIL" : "ok  "} ${label}${problem ? "  <- " + problem : ""}`);
+}
+if (polUpdate) console.log("\n=== SAMPLE UPDATE CARD (ru) ===\n" + polUpdate.card + "\n");
 
 // Aave's real migrator exposes REVISION() = 3, i.e. the RIPEMD-160
 // precompile's address, which answers totalSupply()/symbol() with a hash.

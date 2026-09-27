@@ -1,5 +1,11 @@
 import { pool } from "../client.js";
-import type { ConfidenceLevel, MigrationContractRecord, NetworkKey, TokenBSource } from "../../types/index.js";
+import type {
+  ConfidenceLevel,
+  MigrationAnalysisResult,
+  MigrationContractRecord,
+  NetworkKey,
+  TokenBSource,
+} from "../../types/index.js";
 
 interface MigrationContractRow {
   id: number;
@@ -91,6 +97,50 @@ export const migrationContractRepository = {
       [network, contractAddress],
     );
     return rows.length > 0;
+  },
+
+  async findByContract(network: NetworkKey, contractAddress: `0x${string}`): Promise<MigrationContractRecord | null> {
+    const { rows } = await pool.query<MigrationContractRow>(
+      `SELECT * FROM migration_contracts WHERE network = $1 AND contract_address = lower($2)`,
+      [network, contractAddress],
+    );
+    return rows[0] ? toRecord(rows[0]) : null;
+  },
+
+  /** Stores a re-analysis of an already-detected contract. */
+  async updateAnalysis(
+    id: number,
+    analysis: Pick<
+      MigrationAnalysisResult,
+      | "tokenBAddress"
+      | "confidence"
+      | "confidenceScore"
+      | "matchedFunctions"
+      | "matchedEvents"
+      | "matchedAuxiliary"
+      | "tokenBSource"
+      | "matchedGetter"
+    >,
+  ): Promise<MigrationContractRecord | null> {
+    const { rows } = await pool.query<MigrationContractRow>(
+      `UPDATE migration_contracts
+          SET token_b_address = lower($2), confidence = $3, confidence_score = $4, matched_functions = $5,
+              matched_events = $6, matched_auxiliary = $7, token_b_source = $8, matched_getter = $9
+        WHERE id = $1
+        RETURNING *`,
+      [
+        id,
+        analysis.tokenBAddress,
+        analysis.confidence,
+        analysis.confidenceScore,
+        analysis.matchedFunctions,
+        analysis.matchedEvents,
+        analysis.matchedAuxiliary,
+        analysis.tokenBSource,
+        analysis.matchedGetter,
+      ],
+    );
+    return rows[0] ? toRecord(rows[0]) : null;
   },
 
   async listForToken(tokenId: number): Promise<MigrationContractRecord[]> {

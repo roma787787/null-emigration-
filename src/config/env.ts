@@ -26,6 +26,18 @@ export const env = {
   REDIS_URL: process.env.REDIS_URL ?? "redis://localhost:6379",
   BLOCK_POLL_INTERVAL_MS: Number(process.env.BLOCK_POLL_INTERVAL_MS ?? 3000),
   ENABLE_FACTORY_TRACE_DETECTION: process.env.ENABLE_FACTORY_TRACE_DETECTION !== "false",
+  // After a restart each listener replays the blocks it missed, from its saved
+  // cursor, but never more than this many (older ones are skipped and logged).
+  MAX_CATCHUP_BLOCKS: Number(process.env.MAX_CATCHUP_BLOCKS ?? 2000),
+  // A contract detected without Token B is re-analyzed after each of these
+  // delays (seconds): proxies are often initialized with the tokens a few
+  // transactions after the deploy.
+  RECHECK_DELAYS_SEC: parseList(process.env.RECHECK_DELAYS_SEC ?? "120,600,3600,21600")
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n > 0),
+  // How often every tracked token's owners/admins are re-discovered, so an
+  // ownership transfer to a new wallet or multisig is picked up. 0 disables.
+  OWNER_REFRESH_INTERVAL_HOURS: Number(process.env.OWNER_REFRESH_INTERVAL_HOURS ?? 24),
   LOG_LEVEL: process.env.LOG_LEVEL ?? "info",
   // Etherscan's unified multichain API (v2) — one key, `chainid` selects the
   // network. Covers deployer lookups on every network in networks.ts.

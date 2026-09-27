@@ -28,6 +28,7 @@ const en: Dict = {
     "/analyze <network> <deploy_tx_hash> — check any already-deployed contract for migration signs\n" +
     "/settings — toggle which confidence level / networks alert this chat\n" +
     "/language — change the bot's language\n" +
+    "/status — bot health per network (admins only)\n" +
     "/help — show this message again",
 
   "approval.pending": "🔒 Your access request has been sent to the administrator. You'll get a message here once it's approved.",
@@ -99,6 +100,8 @@ const en: Dict = {
 
   "card.title": "MIGRATION CONTRACT DETECTED",
   "card.titleManual": "CONTRACT ANALYSIS",
+  "card.titleUpdate": "MIGRATION CONTRACT UPDATE",
+  "card.updateNote": "Re-checked after deploy: the contract has been configured since the first alert.",
   "card.tokenAUnknown": "not specified",
   "card.contract": "Contract:",
   "card.network": "Network",
@@ -121,6 +124,29 @@ const en: Dict = {
   "card.variableWord": "variable",
   "card.noSignals": "no explicit signals found",
   "card.links": "Links:",
+
+  "owners.refreshedNew": "🔄 {symbol} on {network}: new owner/admin wallets found and now watched:\n{owners}",
+
+  "status.adminOnly": "This command is available to administrators only.",
+  "status.title": "📡 Bot status",
+  "status.uptime": "⏱ Uptime: {uptime}",
+  "status.counts": "🪙 Tokens: {tokens} · wallets: {owners} · contracts found: {contracts}",
+  "status.queue": "📬 Analysis queue: waiting {waiting} · running {active} · re-checks scheduled {delayed} · failed {failed}",
+  "status.networks": "Networks:",
+  "status.none": "no networks enabled",
+  "status.notStarted": "listener not running",
+  "status.noBlocks": "no blocks processed yet",
+  "status.block": "block {block}",
+  "status.lag": "lag {lag}",
+  "status.headUnknown": "head unavailable",
+  "status.ago": "{ago} ago",
+  "status.trace": "factory trace: {state}",
+  "status.traceOn": "on",
+  "status.traceUnavailable": "unavailable on this RPC",
+  "status.traceOff": "off",
+  "status.skipped": "skipped after downtime: {count}",
+  "status.failedBlocks": "failed blocks: {count}",
+  "status.lastError": "last error {ago} ago: {error}",
 };
 
 const uk: Dict = {
@@ -141,6 +167,7 @@ const uk: Dict = {
     "/analyze <мережа> <хеш_деплою> — перевірити будь-який уже задеплоєний контракт на ознаки міграції\n" +
     "/settings — перемкнути рівень впевненості / мережі для алертів у цьому чаті\n" +
     "/language — змінити мову бота\n" +
+    "/status — стан бота по мережах (лише для адмінів)\n" +
     "/help — показати це повідомлення знову",
 
   "approval.pending": "🔒 Запит на доступ надіслано адміністратору. Ви отримаєте повідомлення тут, коли його схвалять.",
@@ -213,6 +240,8 @@ const uk: Dict = {
 
   "card.title": "ВИЯВЛЕНО КОНТРАКТ МІГРАЦІЇ",
   "card.titleManual": "АНАЛІЗ КОНТРАКТУ",
+  "card.titleUpdate": "ОНОВЛЕННЯ КОНТРАКТУ МІГРАЦІЇ",
+  "card.updateNote": "Повторна перевірка після деплою: контракт налаштували після першого сповіщення.",
   "card.tokenAUnknown": "не вказано",
   "card.contract": "Контракт:",
   "card.network": "Мережа",
@@ -235,6 +264,29 @@ const uk: Dict = {
   "card.variableWord": "змінна",
   "card.noSignals": "явних ознак не знайдено",
   "card.links": "Посилання:",
+
+  "owners.refreshedNew": "🔄 {symbol} у мережі {network}: знайдено нові гаманці власників/адмінів, тепер вони відстежуються:\n{owners}",
+
+  "status.adminOnly": "Ця команда доступна лише адміністраторам.",
+  "status.title": "📡 Стан бота",
+  "status.uptime": "⏱ Працює: {uptime}",
+  "status.counts": "🪙 Токенів: {tokens} · гаманців: {owners} · знайдено контрактів: {contracts}",
+  "status.queue": "📬 Черга аналізу: очікують {waiting} · в роботі {active} · заплановано перевірок {delayed} · з помилкою {failed}",
+  "status.networks": "Мережі:",
+  "status.none": "жодної мережі не ввімкнено",
+  "status.notStarted": "слухач не запущений",
+  "status.noBlocks": "ще не оброблено жодного блоку",
+  "status.block": "блок {block}",
+  "status.lag": "відставання {lag}",
+  "status.headUnknown": "поточний блок недоступний",
+  "status.ago": "{ago} тому",
+  "status.trace": "трасування фабрик: {state}",
+  "status.traceOn": "увімк.",
+  "status.traceUnavailable": "недоступне на цьому RPC",
+  "status.traceOff": "вимк.",
+  "status.skipped": "пропущено після простою: {count}",
+  "status.failedBlocks": "блоків з помилкою: {count}",
+  "status.lastError": "остання помилка {ago} тому: {error}",
 };
 
 const ru: Dict = {
@@ -255,6 +307,7 @@ const ru: Dict = {
     "/analyze <сеть> <хеш_деплоя> — проверить любой уже задеплоенный контракт на признаки миграции\n" +
     "/settings — переключить уровень уверенности / сети для алертов в этом чате\n" +
     "/language — сменить язык бота\n" +
+    "/status — состояние бота по сетям (только для админов)\n" +
     "/help — показать это сообщение снова",
 
   "approval.pending": "🔒 Запрос на доступ отправлен администратору. Вы получите сообщение здесь, когда его одобрят.",
@@ -327,6 +380,8 @@ const ru: Dict = {
 
   "card.title": "ОБНАРУЖЕН КОНТРАКТ МИГРАЦИИ",
   "card.titleManual": "АНАЛИЗ КОНТРАКТА",
+  "card.titleUpdate": "ОБНОВЛЕНИЕ КОНТРАКТА МИГРАЦИИ",
+  "card.updateNote": "Повторная проверка после деплоя: контракт настроили после первого уведомления.",
   "card.tokenAUnknown": "не указан",
   "card.contract": "Контракт:",
   "card.network": "Сеть",
@@ -349,6 +404,29 @@ const ru: Dict = {
   "card.variableWord": "переменная",
   "card.noSignals": "явных признаков не найдено",
   "card.links": "Ссылки:",
+
+  "owners.refreshedNew": "🔄 {symbol} в сети {network}: найдены новые кошельки владельцев/админов, теперь они отслеживаются:\n{owners}",
+
+  "status.adminOnly": "Эта команда доступна только администраторам.",
+  "status.title": "📡 Состояние бота",
+  "status.uptime": "⏱ Работает: {uptime}",
+  "status.counts": "🪙 Токенов: {tokens} · кошельков: {owners} · найдено контрактов: {contracts}",
+  "status.queue": "📬 Очередь анализа: ждут {waiting} · в работе {active} · запланировано перепроверок {delayed} · с ошибкой {failed}",
+  "status.networks": "Сети:",
+  "status.none": "ни одна сеть не включена",
+  "status.notStarted": "слушатель не запущен",
+  "status.noBlocks": "ещё не обработано ни одного блока",
+  "status.block": "блок {block}",
+  "status.lag": "отставание {lag}",
+  "status.headUnknown": "текущий блок недоступен",
+  "status.ago": "{ago} назад",
+  "status.trace": "трассировка фабрик: {state}",
+  "status.traceOn": "вкл.",
+  "status.traceUnavailable": "недоступна на этом RPC",
+  "status.traceOff": "выкл.",
+  "status.skipped": "пропущено после простоя: {count}",
+  "status.failedBlocks": "блоков с ошибкой: {count}",
+  "status.lastError": "последняя ошибка {ago} назад: {error}",
 };
 
 export const translations: Record<Language, Dict> = { en, uk, ru };

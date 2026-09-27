@@ -67,3 +67,11 @@ CREATE TABLE IF NOT EXISTS chat_settings (
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS language TEXT CHECK (language IN ('en', 'uk', 'ru'));
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS access_requested BOOLEAN NOT NULL DEFAULT false;
+
+-- Last block each network's listener finished, so a restart (e.g. a redeploy)
+-- resumes from there instead of skipping the blocks mined while it was down.
+CREATE TABLE IF NOT EXISTS network_cursors (
+    network    TEXT PRIMARY KEY,
+    last_block BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -25,10 +25,27 @@ function collectCreates(frame: CallFrame, out: TracedCreate[]): void {
   }
 }
 
-// Networks whose RPC endpoint doesn't expose debug_traceTransaction (or errored
-// on first attempt) — skipped for the rest of the process's lifetime instead
-// of retrying every matching tx.
-const unsupportedNetworks = new Set<NetworkKey>();
+// RPC error codes meaning "this endpoint doesn't offer the method at all".
+const UNSUPPORTED_CODES = new Set([-32601, -32004]);
+const MAX_CONSECUTIVE_FAILURES = 3;
+// A disabled network is probed again after this long (plans and nodes change).
+const DISABLE_FOR_MS = 6 * 60 * 60 * 1000;
+
+const consecutiveFailures = new Map<NetworkKey, number>();
+const disabledUntil = new Map<NetworkKey, number>();
+
+function isUnsupportedMethod(err: unknown): boolean {
+  for (let e = err as { code?: unknown; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
+    if (typeof e.code === "number" && UNSUPPORTED_CODES.has(e.code)) return true;
+  }
+  return false;
+}
+
+export type TraceStatus = "on" | "unavailable";
+
+export function traceDetectionStatus(network: NetworkKey): TraceStatus {
+  return (disabledUntil.get(network) ?? 0) > Date.now() ? "unavailable" : "on";
+}
 
 /**
  * Finds contracts created via an *internal* CREATE/CREATE2 inside a
@@ -38,15 +55,17 @@ const unsupportedNetworks = new Set<NetworkKey>();
  *
  * Requires the RPC endpoint to expose `debug_traceTransaction` with the
  * `callTracer` (standard on Geth/Erigon-based nodes and most paid RPC
- * providers, but not on every public endpoint). The first failure disables
- * tracing for that network rather than erroring on every subsequent call.
+ * providers, but not on every public endpoint). A "method not supported"
+ * answer, or three failures in a row, disables tracing for that network for
+ * a few hours; a single transient failure is thrown instead, so the block
+ * listener retries the block rather than silently missing a deployment.
  */
 export async function findFactoryCreatedContracts(
   client: PublicClient,
   network: NetworkKey,
   txHash: `0x${string}`,
 ): Promise<TracedCreate[]> {
-  if (unsupportedNetworks.has(network)) return [];
+  if (traceDetectionStatus(network) === "unavailable") return [];
 
   try {
     // debug_traceTransaction isn't part of viem's typed public actions, so
@@ -61,14 +80,20 @@ export async function findFactoryCreatedContracts(
       params: [txHash, { tracer: "callTracer" }],
     });
 
+    consecutiveFailures.delete(network);
     const out: TracedCreate[] = [];
     collectCreates(trace, out);
     return out;
   } catch (err) {
-    unsupportedNetworks.add(network);
+    const failures = (consecutiveFailures.get(network) ?? 0) + 1;
+    consecutiveFailures.set(network, failures);
+    if (!isUnsupportedMethod(err) && failures < MAX_CONSECUTIVE_FAILURES) throw err;
+
+    consecutiveFailures.delete(network);
+    disabledUntil.set(network, Date.now() + DISABLE_FOR_MS);
     logger.warn(
       { err, network },
-      "debug_traceTransaction unavailable on this RPC — disabling factory/CREATE2 detection for this network",
+      "debug_traceTransaction unavailable on this RPC — factory/CREATE2 detection paused for this network for 6h",
     );
     return [];
   }

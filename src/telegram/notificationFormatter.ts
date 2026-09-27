@@ -52,6 +52,8 @@ function foundSignals(lang: Language, migration: MigrationContractRecord): strin
 interface FormatOptions {
   /** An on-demand /analyze result rather than a live detection: neutral title, no owner claim about the creator. */
   manual?: boolean;
+  /** A re-check found more (usually Token B) after the first alert for this contract. */
+  update?: boolean;
 }
 
 /**
@@ -93,7 +95,9 @@ export function formatMigrationAlert(
 
   const title = options.manual
     ? `🔎 *${escapeMd(t(lang, "card.titleManual"))}*`
-    : `🚨 *${escapeMd(t(lang, "card.title"))}* 🚨`;
+    : options.update
+      ? `🔄 *${escapeMd(t(lang, "card.titleUpdate"))}*\n_${escapeMd(t(lang, "card.updateNote"))}_`
+      : `🚨 *${escapeMd(t(lang, "card.title"))}* 🚨`;
   const creatorRole = options.manual ? "" : ` \\(${escapeMd(t(lang, "card.deployerOwner"))}\\)`;
 
   return [
@@ -103,7 +107,7 @@ export function formatMigrationAlert(
     `🪙 ${escapeMd(t(lang, "card.tokenA"))}: ${tokenA}`,
     `👤 ${escapeMd(t(lang, "card.creator"))}: ${creator}${creatorRole}`,
     "",
-    `📄 ${escapeMd(t(lang, options.manual ? "card.contract" : "card.newContract"))}`,
+    `📄 ${escapeMd(t(lang, options.manual || options.update ? "card.contract" : "card.newContract"))}`,
     contract,
     "",
     `🎯 ${escapeMd(t(lang, "card.targetToken"))}`,

@@ -17,6 +17,7 @@ contract SimpleToken {
         totalSupply = supply; balanceOf[msg.sender] = supply;
         emit Transfer(address(0), msg.sender, supply);
     }
+    function transferOwnership(address n) external { require(msg.sender == owner); owner = n; }
     function transfer(address to, uint256 v) external returns (bool) {
         balanceOf[msg.sender] -= v; balanceOf[to] += v; emit Transfer(msg.sender, to, v); return true;
     }

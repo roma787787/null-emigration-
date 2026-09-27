@@ -12,7 +12,8 @@ Implements the architecture from the project spec:
 2. **Multi-EVM block listener** — subscribes to new blocks (WebSocket push
    when available, HTTP polling otherwise) on every configured network and
    flags contract-creation transactions from tracked owners, including ones
-   deployed through a factory.
+   deployed through a factory. Progress is saved per network, so after a
+   restart or redeploy the listener first replays the blocks it missed.
 3. **Migration analyzer** — reads the contract's function list from its
    bytecode (following EIP-1967 / beacon / EIP-1167 proxies to the
    implementation), names those functions via the public 4-byte signature
@@ -22,9 +23,13 @@ Implements the architecture from the project spec:
    itself an ERC-20. Token B is found via known getters, then by calling
    every zero-argument function and keeping ERC-20 results other than Token
    A (catches `AAVE()`, `polygonEcosystemToken()`…), then via constructor
-   args. Result: a HIGH / MEDIUM / LOW label plus a 0–100% score.
+   args. Result: a HIGH / MEDIUM / LOW label plus a 0–100% score. A
+   contract detected without Token B is re-checked later (proxies are often
+   initialized with the tokens a few transactions after the deploy) and an
+   update card is sent once Token B shows up.
 4. **Telegram bot** — `/add_token`, `/list`, `/remove_token`, `/add_owner`,
-   `/remove_owner`, `/settings`, and the alert card itself. Every chat picks
+   `/remove_owner`, `/settings`, `/analyze`, the admin-only `/status`, and
+   the alert card itself. Every chat picks
    a language (English/Ukrainian/Russian) on first contact and needs
    administrator approval before any command works.
 
@@ -95,6 +100,16 @@ npm run dev                # or: npm run build && npm start
   disable). If it's unreachable, detection still works but project-specific
   names like `migrateFromLEND` aren't recognised, so such migrators score
   MEDIUM instead of HIGH.
+- `MAX_CATCHUP_BLOCKS` — optional (default `2000`); after a restart each
+  network replays at most this many missed blocks (older ones are skipped
+  and counted in `/status`).
+- `RECHECK_DELAYS_SEC` — optional (default `120,600,3600,21600`); when a
+  contract is detected without Token B it is re-analyzed after each of these
+  delays until Token B is found.
+- `OWNER_REFRESH_INTERVAL_HOURS` — optional (default `24`, `0` disables);
+  how often every tracked token's owners are re-discovered. Newly found
+  wallets (e.g. ownership moved to a multisig) are linked automatically and
+  the chat that added the token is told. Old wallets are kept.
 - `ADMIN_CHAT_IDS` — comma-separated Telegram numeric chat/user IDs (not
   `@usernames`) that are administrators. Required for anyone other than the
   admins themselves to ever use the bot — see "Access control" below.
@@ -129,7 +144,15 @@ if you need one.
 /settings                                         Inline-keyboard toggles for confidence + network filters
 /language                                         Change the bot's language
 /analyze <network> <deploy_tx_hash> [token_a]     Analyze any already-deployed contract on demand
+/status                                           Admins only: per-network health, lag, errors, queue
 ```
+
+`/status` shows, per enabled network: 🟢/🟡/🔴 (last block processed under
+2 min / 10 min / longer ago), websocket or polling mode, the last processed
+block and how far behind the chain head it is, whether factory tracing works
+on that RPC, plus blocks skipped after a long downtime, blocks that failed
+every retry, and the last RPC error. Also totals (tokens, wallets, detected
+contracts) and the analysis queue, including scheduled re-checks.
 
 `/analyze` runs the same analyzer on the contract(s) an already-mined
 transaction created — a direct deploy or a factory call — and replies with
@@ -200,6 +223,10 @@ verdict:
 | Sky-style: `mkrToSky`, Token A with a `bytes32` symbol | HIGH, symbol reads as `MKR` |
 | Polygon-style: `polygonEcosystemToken()` behind a proxy | HIGH |
 | USDT-style ERC-20 with `redeem()` (control) | LOW |
+| Migrator deployed while the listener is stopped | caught after restart |
+| Logic deployed uninitialized, `initialize()` called later | update card with Token B |
+| Token ownership transferred to a new wallet | refresh links it; its deploys are caught |
+| `/status` | network shown healthy with block and lag |
 
 The harness runs a local stub of the signature database, so function naming
 is exercised offline too.
@@ -215,9 +242,10 @@ fixtures, edit `e2e/Fixtures.sol` and regenerate `e2e/artifacts.json` with
 - **Factory-deployed contracts (`CREATE2` via a factory)**: detected via
   `debug_traceTransaction` (see `src/chain/traceCreateDetector.ts`), but only
   on RPC endpoints that expose the `debug` namespace — not every free-tier
-  provider does. A network whose endpoint doesn't support it is
-  auto-disabled for factory detection after the first failed call (logged
-  once), while direct EOA deployments (`to == null`) keep working
+  provider does. A network whose endpoint answers "method not supported",
+  or fails three calls in a row, has factory detection paused for 6 hours
+  (logged, and shown in `/status`); a single transient failure just
+  retries the block. Meanwhile direct EOA deployments (`to == null`) keep working
   regardless. Set `ENABLE_FACTORY_TRACE_DETECTION=false` to skip it
   entirely.
 - **Constructor argument decoding** is heuristic (see
