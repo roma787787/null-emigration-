@@ -4,6 +4,7 @@ import { runMigrations } from "./db/migrate.js";
 import { startBlockListener } from "./chain/blockListener.js";
 import { enqueueContractCreation, startContractCreationWorker } from "./queue/notificationQueue.js";
 import { createBot, broadcastMigrationAlert } from "./telegram/bot.js";
+import { launchWithConflictRetry } from "./telegram/launch.js";
 import { logger } from "./utils/logger.js";
 
 async function main() {
@@ -44,7 +45,11 @@ async function main() {
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutting down");
-    bot.stop(signal);
+    try {
+      bot.stop(signal);
+    } catch {
+      // Telegraf throws if polling never started (e.g. still retrying a 409).
+    }
     for (const stop of stopListeners) stop();
     await worker.close();
     process.exit(0);
@@ -56,7 +61,7 @@ async function main() {
   // launch() only resolves once polling stops, so anything after it would
   // never run while the bot is up — hence the onLaunch callback and the
   // signal handlers being registered first.
-  await bot.launch(() => {
+  await launchWithConflictRetry(bot, () => {
     logger.info({ networks: started }, "Multi-EVM migration tracker started");
   });
 }
