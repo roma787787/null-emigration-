@@ -13,11 +13,16 @@ Implements the architecture from the project spec:
    when available, HTTP polling otherwise) on every configured network and
    flags contract-creation transactions from tracked owners, including ones
    deployed through a factory.
-3. **Migration analyzer** — decodes constructor args (including a Token-A
-   self-reference check), scans bytecode for migration-style function
-   selectors *and* event topics, static-calls "Token B" getters plus
-   auxiliary signals (`oldToken()`, `rate()`), and assigns a HIGH / MEDIUM /
-   LOW confidence label with a supplementary 0–100% score.
+3. **Migration analyzer** — reads the contract's function list from its
+   bytecode (following EIP-1967 / beacon / EIP-1167 proxies to the
+   implementation), names those functions via the public 4-byte signature
+   database, and classifies them: `migrate*`, `convert*`, `swap*`,
+   `exchange*` and `xxxToYyy` (e.g. `mkrToSky`) are strong signals;
+   `claim`/`redeem`/`deposit` are weak and ignored when the contract is
+   itself an ERC-20. Token B is found via known getters, then by calling
+   every zero-argument function and keeping ERC-20 results other than Token
+   A (catches `AAVE()`, `polygonEcosystemToken()`…), then via constructor
+   args. Result: a HIGH / MEDIUM / LOW label plus a 0–100% score.
 4. **Telegram bot** — `/add_token`, `/list`, `/remove_token`, `/add_owner`,
    `/remove_owner`, `/settings`, and the alert card itself. Every chat picks
    a language (English/Ukrainian/Russian) on first contact and needs
@@ -84,6 +89,12 @@ npm run dev                # or: npm run build && npm start
   lookups via Etherscan's unified multichain API (one key covers every
   supported network). Without it, owner discovery still works for tokens
   that expose `owner()`/`admin()`/`DEFAULT_ADMIN_ROLE` on-chain.
+- `SIGNATURE_DB_URL` — optional; the OpenChain-compatible signature database
+  used to name functions of unverified contracts (default
+  `https://api.4byte.sourcify.dev/signature-database/v1/lookup`, `off` to
+  disable). If it's unreachable, detection still works but project-specific
+  names like `migrateFromLEND` aren't recognised, so such migrators score
+  MEDIUM instead of HIGH.
 - `ADMIN_CHAT_IDS` — comma-separated Telegram numeric chat/user IDs (not
   `@usernames`) that are administrators. Required for anyone other than the
   admins themselves to ever use the bot — see "Access control" below.
@@ -184,6 +195,14 @@ verdict:
 | Unrelated contract | LOW |
 | Same contract deployed by a non-owner wallet | not detected |
 | Migrator deployed through a factory via `CREATE2` | HIGH (trace-based detection) |
+| Migrator behind an EIP-1967 proxy / EIP-1167 clone | HIGH / MEDIUM (implementation scanned) |
+| Aave-style: `migrateFromLEND`, `LEND()`/`AAVE()`, behind a proxy | HIGH, Token B via `AAVE()` |
+| Sky-style: `mkrToSky`, Token A with a `bytes32` symbol | HIGH, symbol reads as `MKR` |
+| Polygon-style: `polygonEcosystemToken()` behind a proxy | HIGH |
+| USDT-style ERC-20 with `redeem()` (control) | LOW |
+
+The harness runs a local stub of the signature database, so function naming
+is exercised offline too.
 
 Prerequisites: `anvil --block-time 1` on `:8545`, plus Postgres and Redis
 (`docker compose up -d`). The Telegram send itself is the only thing not

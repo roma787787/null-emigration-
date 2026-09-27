@@ -2,17 +2,13 @@ import type { Telegraf } from "telegraf";
 import { getAddress, isAddress } from "viem";
 import { isKnownNetwork, allNetworkKeys } from "../../config/networks.js";
 import { getPublicClient } from "../../chain/provider.js";
+import { readTokenText } from "../../chain/tokenMetadata.js";
 import { discoverAllOwners } from "../../chain/ownerDiscovery.js";
 import { tokenRepository } from "../../db/repositories/tokenRepository.js";
 import { ownerRepository } from "../../db/repositories/ownerRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
-
-const NAME_SYMBOL_ABI = [
-  { type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-] as const;
 
 export function registerAddTokenCommand(bot: Telegraf): void {
   bot.command("add_token", async (ctx) => {
@@ -50,8 +46,8 @@ export function registerAddTokenCommand(bot: Telegraf): void {
     try {
       const client = getPublicClient(network);
       [name, symbol] = await Promise.all([
-        client.readContract({ address, abi: NAME_SYMBOL_ABI, functionName: "name" }).catch(() => null),
-        client.readContract({ address, abi: NAME_SYMBOL_ABI, functionName: "symbol" }).catch(() => null),
+        readTokenText(client, address, "name"),
+        readTokenText(client, address, "symbol"),
       ]);
     } catch (err) {
       logger.warn({ err, network, address }, "Failed to read token metadata");

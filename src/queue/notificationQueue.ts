@@ -2,7 +2,6 @@ import { Queue, Worker, type Job } from "bullmq";
 import { createRedisConnection } from "./redisClient.js";
 import type { MigrationContractRecord, NetworkKey, TokenRecord } from "../types/index.js";
 import { analyzeMigrationContract } from "../analyzer/migrationAnalyzer.js";
-import { pickReferencedToken } from "../analyzer/pickToken.js";
 import { migrationContractRepository } from "../db/repositories/migrationContractRepository.js";
 import { tokenRepository } from "../db/repositories/tokenRepository.js";
 import type { TrackedContractCreationEvent } from "../chain/blockListener.js";
@@ -77,19 +76,26 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
       }
 
       // A deployment maps to one migration_contracts row, so when the creator
-      // owns several tracked tokens it's attributed to the one the contract
-      // references, preferring tokens on the same network.
+      // owns several tracked tokens the analyzer attributes it to the one the
+      // contract references; same-network tokens are the fallback.
       const tokenIds = data.tokenIds ?? (data.tokenId !== undefined ? [data.tokenId] : []);
       const candidates = (await Promise.all(tokenIds.map((id) => tokenRepository.findById(id))))
         .filter((t): t is TokenRecord => t !== null)
         .sort((x, y) => Number(y.network === data.network) - Number(x.network === data.network));
-      const token = pickReferencedToken(candidates, [data.input]);
-      if (!token) {
+      if (candidates.length === 0) {
         logger.warn({ tokenIds }, "Tokens no longer tracked, dropping job");
         return;
       }
 
-      const analysis = await analyzeMigrationContract(data.network, data.contractAddress, data.input, token.address);
+      const analysis = await analyzeMigrationContract(
+        data.network,
+        data.contractAddress,
+        data.input,
+        candidates.map((t) => t.address),
+      );
+      const token =
+        candidates.find((t) => analysis.tokenAAddress && t.address.toLowerCase() === analysis.tokenAAddress.toLowerCase()) ??
+        candidates[0]!;
 
       const migrationContract = await migrationContractRepository.create({
         tokenId: token.id,

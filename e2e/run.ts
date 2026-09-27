@@ -2,8 +2,18 @@
 // Postgres -> alert card) against a local anvil chain. Needs anvil on :8545
 // plus Postgres and Redis — see README "End-to-end test".
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { createWalletClient, createPublicClient, encodeFunctionData, http, type Abi, type Address, type Hex } from "viem";
+import {
+  createWalletClient,
+  createPublicClient,
+  encodeFunctionData,
+  http,
+  toFunctionSelector,
+  type Abi,
+  type Address,
+  type Hex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
@@ -19,6 +29,31 @@ process.env.RPC_ANVIL ??= "ws://127.0.0.1:8545,http://127.0.0.1:8545";
 process.env.ENABLED_NETWORKS = NETWORK;
 process.env.LOG_LEVEL ??= "warn";
 process.env.NODE_ENV = "production";
+
+// Local stand-in for the public 4-byte signature DB (same response shape as
+// api.4byte.sourcify.dev), so function-name recognition runs offline too.
+const KNOWN_SIGNATURES = [
+  "migrateFromLEND(uint256)", "LEND()", "AAVE()", "LEND_AAVE_RATIO()",
+  "mkrToSky(address,uint256)", "mkr()", "sky()", "rate()",
+  "migrate(uint256)", "unmigrate(uint256)", "matic()", "polygonEcosystemToken()", "initialize(address,address)",
+  "redeem(uint256)", "issue(uint256)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
+  "owner()", "name()", "symbol()", "newToken()", "oldToken()",
+];
+const signatureBySelector = new Map(KNOWN_SIGNATURES.map((sig) => [toFunctionSelector(sig), sig]));
+let signatureDbHits = 0;
+const signatureDb = createServer((req, res) => {
+  signatureDbHits++;
+  const selectors = (new URL(req.url ?? "/", "http://x").searchParams.get("function") ?? "").split(",");
+  const fn: Record<string, Array<{ name: string; filtered: boolean }>> = {};
+  for (const sel of selectors) {
+    const name = signatureBySelector.get(sel as Hex);
+    fn[sel] = name ? [{ name, filtered: false }] : [];
+  }
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ ok: true, result: { event: {}, function: fn } }));
+});
+await new Promise<void>((r) => signatureDb.listen(8547, "127.0.0.1", r));
+process.env.SIGNATURE_DB_URL = "http://127.0.0.1:8547/signature-database/v1/lookup";
 
 const ARTIFACTS = process.env.E2E_ARTIFACTS ?? fileURLToPath(new URL("./artifacts.json", import.meta.url));
 const artifacts = JSON.parse(readFileSync(ARTIFACTS, "utf8")) as Record<string, { abi: Abi; bytecode: Hex }>;
@@ -37,6 +72,7 @@ const { enqueueContractCreation, startContractCreationWorker, getContractCreatio
 );
 const { formatMigrationAlert } = await import("../src/telegram/notificationFormatter.js");
 const { analyzeDeployTx } = await import("../src/analyzer/analyzeDeployTx.js");
+const { readTokenSymbol } = await import("../src/chain/tokenMetadata.js");
 
 const rpc = http("http://127.0.0.1:8545");
 const chainClient = createPublicClient({ chain: foundry, transport: rpc });
@@ -69,12 +105,18 @@ for (const o of owners) await ownerRepository.upsert(token.id, o.address, o.sour
 console.log(`Token A ${oldToken.address}, Token B ${newToken.address}, decoy ${decoyToken.address}`);
 console.log("Discovered owners:", owners.map((o) => `${o.address} (${o.source})`).join(", ") || "none");
 
+// MKR-style Token A whose symbol() is bytes32 — must read as "MKR", not UNKNOWN.
+const mkrToken = await deploy(owner, "Bytes32Token", [10n ** 24n]);
+const mkrSymbol = await readTokenSymbol(chainClient as never, mkrToken.address);
+const mkr = await tokenRepository.add(NETWORK, mkrToken.address, "e2e-chat", { symbol: mkrSymbol, name: "Maker" });
+await ownerRepository.upsert(mkr.id, owner.account.address, "owner");
+
 // Let the token deploys fall into already-finished blocks before listening.
 const startBlock = await chainClient.getBlockNumber();
 while ((await chainClient.getBlockNumber()) < startBlock + 2n) await new Promise((r) => setTimeout(r, 200));
 
 // --- pipeline ---------------------------------------------------------------
-type Result = { address: string; tokenA: string; confidence: string; score: number; source: string | null; tokenB: string | null; at: number; card: string };
+type Result = { address: string; tokenA: string; getter: string | null; confidence: string; score: number; source: string | null; tokenB: string | null; at: number; card: string };
 const results = new Map<string, Result>();
 const sentAt = new Map<string, number>();
 
@@ -82,6 +124,7 @@ startContractCreationWorker(async ({ token: tk, migrationContract: mc }) => {
   results.set(mc.contractAddress.toLowerCase(), {
     address: mc.contractAddress,
     tokenA: tk.address,
+    getter: mc.matchedGetter,
     confidence: mc.confidence,
     score: mc.confidenceScore,
     source: mc.tokenBSource,
@@ -94,7 +137,7 @@ startBlockListener(NETWORK, (event) => enqueueContractCreation(event));
 await new Promise((r) => setTimeout(r, 1500));
 
 // --- scenarios --------------------------------------------------------------
-type Case = { label: string; address: Address; expect: { confidence?: string; tokenB?: Address | null; source?: string; detected: boolean; attributedToTokenA?: boolean } };
+type Case = { label: string; address: Address; expect: { confidence?: string; tokenB?: Address | null; source?: string; detected: boolean; attributedTo?: Address; getter?: string } };
 const cases: Case[] = [];
 async function run(label: string, wallet: typeof owner, name: string, args: unknown[], expect: Case["expect"]) {
   const t0 = Date.now();
@@ -105,13 +148,13 @@ async function run(label: string, wallet: typeof owner, name: string, args: unkn
 }
 
 const gettersDeploy = await run("getters+migrate+event", owner, "MigratorWithGetters", [oldToken.address, newToken.address], {
-  detected: true, confidence: "HIGH", tokenB: newToken.address, attributedToTokenA: true,
+  detected: true, confidence: "HIGH", tokenB: newToken.address, attributedTo: oldToken.address,
 });
 await run("private storage, tokens only in ctor args", owner, "MigratorPrivate", [oldToken.address, newToken.address], {
-  detected: true, confidence: "HIGH", tokenB: newToken.address, source: "constructor_args", attributedToTokenA: true,
+  detected: true, confidence: "HIGH", tokenB: newToken.address, source: "constructor_args", attributedTo: oldToken.address,
 });
 await run("ctor has only Token A (+ a non-token addr)", owner, "MigratorPrivate", [oldToken.address, stranger.account.address], {
-  detected: true, confidence: "HIGH", tokenB: null, source: "token_a_match", attributedToTokenA: true,
+  detected: true, confidence: "HIGH", tokenB: null, source: "token_a_match", attributedTo: oldToken.address,
 });
 await run("claim() but no token configured", owner, "MigratorUnconfigured", [], { detected: true, confidence: "MEDIUM", tokenB: null });
 await run("unrelated Counter", owner, "Counter", [], { detected: true, confidence: "LOW", tokenB: null });
@@ -133,7 +176,7 @@ const callHash = await owner.writeContract({
 } as never);
 await chainClient.waitForTransactionReceipt({ hash: callHash });
 sentAt.set(predicted.toLowerCase(), t0);
-cases.push({ label: "CREATE2 child via factory call", address: predicted, expect: { detected: true, confidence: "HIGH", tokenB: newToken.address, attributedToTokenA: true } });
+cases.push({ label: "CREATE2 child via factory call", address: predicted, expect: { detected: true, confidence: "HIGH", tokenB: newToken.address, attributedTo: oldToken.address } });
 
 // Proxies: the migrate()/Migrated code lives only in the implementation.
 const impl = await run("proxy implementation (uninitialized logic)", owner, "MigratorUpgradeable", [], {
@@ -143,7 +186,7 @@ const initData = encodeFunctionData({
   abi: artifacts.MigratorUpgradeable!.abi, functionName: "initialize", args: [oldToken.address, newToken.address],
 });
 await run("EIP-1967 proxy initialized with (A, B)", owner, "SimpleProxy", [impl.address, initData], {
-  detected: true, confidence: "HIGH", tokenB: newToken.address, source: "static_call", attributedToTokenA: true,
+  detected: true, confidence: "HIGH", tokenB: newToken.address, source: "static_call", attributedTo: oldToken.address,
 });
 const cloneFactory = await run("clone factory contract itself", owner, "CloneFactory", [], { detected: true, confidence: "LOW" });
 const { abi: cloneAbi } = artifacts.CloneFactory!;
@@ -159,6 +202,32 @@ const cloneHash = await owner.writeContract({
 await chainClient.waitForTransactionReceipt({ hash: cloneHash });
 sentAt.set(clonePredicted.toLowerCase(), tClone);
 cases.push({ label: "EIP-1167 clone of the migrator (via factory)", address: clonePredicted, expect: { detected: true, confidence: "MEDIUM", tokenB: null } });
+
+// Real-world shapes: project-specific names no fixed list covers.
+const lendImpl = await run("Aave-style impl: migrateFromLEND, LEND()/AAVE()", owner, "LendStyleMigrator",
+  [oldToken.address, newToken.address], {
+  detected: true, confidence: "HIGH", tokenB: newToken.address, source: "static_call", getter: "AAVE", attributedTo: oldToken.address,
+});
+await run("Aave-style: same migrator behind an EIP-1967 proxy", owner, "SimpleProxy", [lendImpl.address, "0x"], {
+  // Token addresses live only in the implementation's immutables here.
+  detected: true, confidence: "HIGH", tokenB: newToken.address, getter: "AAVE", attributedTo: oldToken.address,
+});
+await run("Sky-style converter: mkrToSky, bytes32 MKR", owner, "SkyStyleConverter",
+  [mkrToken.address, newToken.address, 24_000n], {
+  detected: true, confidence: "HIGH", tokenB: newToken.address, attributedTo: mkrToken.address,
+});
+const polImpl = await run("Polygon-style logic (uninitialized)", owner, "PolStyleMigration", [], {
+  detected: true, confidence: "MEDIUM", tokenB: null,
+});
+const polInit = encodeFunctionData({
+  abi: artifacts.PolStyleMigration!.abi, functionName: "initialize", args: [oldToken.address, newToken.address],
+});
+await run("Polygon-style: proxy, polygonEcosystemToken()", owner, "SimpleProxy", [polImpl.address, polInit], {
+  detected: true, confidence: "HIGH", tokenB: newToken.address, getter: "polygonEcosystemToken", attributedTo: oldToken.address,
+});
+await run("USDT-style token with redeem() (control)", owner, "UsdtStyleToken", [10n ** 24n], {
+  detected: true, confidence: "LOW", tokenB: null,
+});
 
 // --- wait & report ------------------------------------------------------------
 const expectedDetections = cases.filter((c) => c.expect.detected).length;
@@ -176,8 +245,9 @@ for (const c of cases) {
   if (r && c.expect.tokenB !== undefined && (r.tokenB?.toLowerCase() ?? null) !== (c.expect.tokenB?.toLowerCase() ?? null))
     problems.push(`tokenB ${r.tokenB} != ${c.expect.tokenB}`);
   if (r && c.expect.source && r.source !== c.expect.source) problems.push(`source ${r.source} != ${c.expect.source}`);
-  if (r && c.expect.attributedToTokenA && r.tokenA.toLowerCase() !== oldToken.address.toLowerCase())
-    problems.push(`attributed to ${r.tokenA}, not Token A`);
+  if (r && c.expect.attributedTo && r.tokenA.toLowerCase() !== c.expect.attributedTo.toLowerCase())
+    problems.push(`attributed to ${r.tokenA}, not ${c.expect.attributedTo}`);
+  if (r && c.expect.getter && r.getter !== c.expect.getter) problems.push(`getter ${r.getter} != ${c.expect.getter}`);
   if (problems.length) failures++;
   const latency = r ? `${((r.at - sentAt.get(c.address.toLowerCase())!) / 1000).toFixed(1)}s` : "-";
   console.log(
@@ -191,7 +261,7 @@ console.log("\n=== SAMPLE CARD (ru, getters case) ===\n" + results.get(cases[0]!
 console.log("\n=== SAMPLE CARD (ru, Token-A-only case) ===\n" + results.get(cases[2]!.address.toLowerCase())?.card);
 // --- /analyze core on already-mined transactions ------------------------------
 console.log("\n=== /analyze (analyzeDeployTx) ===");
-const tokenA = async () => oldToken.address;
+const tokenA = async () => [oldToken.address];
 const { abi: tokenAbi } = artifacts.SimpleToken!;
 const transferHash = await owner.writeContract({
   address: oldToken.address, abi: tokenAbi, functionName: "transfer", args: [stranger.account.address, 1n],
@@ -232,5 +302,9 @@ for (const check of analyzeChecks) {
   console.log(`${problem ? "FAIL" : "ok  "} ${check.label}${problem ? "  <- " + problem : ""}`);
 }
 
+if (mkrSymbol !== "MKR") { failures++; console.log(`FAIL bytes32 symbol read as ${mkrSymbol}, expected MKR`); }
+else console.log("ok   bytes32 symbol() read as MKR");
+if (signatureDbHits === 0) { failures++; console.log("FAIL signature DB was never queried"); }
+else console.log(`ok   signature DB queried (${signatureDbHits} requests)`);
 console.log(`\n${failures === 0 ? "ALL PASSED" : `${failures} FAILURE(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

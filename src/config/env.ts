@@ -30,6 +30,9 @@ export const env = {
   // Etherscan's unified multichain API (v2) — one key, `chainid` selects the
   // network. Covers deployer lookups on every network in networks.ts.
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY ?? "",
+  // OpenChain-compatible 4-byte signature database used to name unverified
+  // contracts' functions; "off" disables lookups.
+  SIGNATURE_DB_URL: process.env.SIGNATURE_DB_URL ?? "https://api.4byte.sourcify.dev/signature-database/v1/lookup",
 
   rpcUrlsFor(network: NetworkKey): string[] {
     return parseList(process.env[`RPC_${envKeyFor(network)}`]);

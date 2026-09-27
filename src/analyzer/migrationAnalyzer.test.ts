@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeConfidence, computeConfidenceScore } from "./migrationAnalyzer.js";
+import { computeConfidence, computeConfidenceScore, hasFunctionSignal } from "./migrationAnalyzer.js";
 
 test("HIGH requires both a matched function and a Token B address", () => {
   assert.equal(computeConfidence(true, true), "HIGH");
@@ -18,7 +18,13 @@ test("LOW when neither signal is present", () => {
   assert.equal(computeConfidence(false, false), "LOW");
 });
 
-const noSignals = { tokenBSource: null, functionCount: 0, eventCount: 0, auxiliaryCount: 0 } as const;
+const noSignals = {
+  tokenBSource: null,
+  strongFunctionCount: 0,
+  weakFunctionCount: 0,
+  eventCount: 0,
+  auxiliaryCount: 0,
+} as const;
 
 test("confidence score is 0 for LOW with no signals", () => {
   assert.equal(computeConfidenceScore("LOW", noSignals), 0);
@@ -33,7 +39,8 @@ test("confidence score weighs a static-call Token B match higher than a construc
 test("confidence score is capped at 100 even with excess signals", () => {
   const score = computeConfidenceScore("HIGH", {
     tokenBSource: "static_call",
-    functionCount: 10,
+    strongFunctionCount: 10,
+    weakFunctionCount: 10,
     eventCount: 10,
     auxiliaryCount: 10,
   });
@@ -41,14 +48,20 @@ test("confidence score is capped at 100 even with excess signals", () => {
 });
 
 test("matched functions/events/auxiliary counts are capped at 2 each for scoring", () => {
-  const two = computeConfidenceScore("MEDIUM", { ...noSignals, functionCount: 2 });
-  const five = computeConfidenceScore("MEDIUM", { ...noSignals, functionCount: 5 });
+  const two = computeConfidenceScore("MEDIUM", { ...noSignals, strongFunctionCount: 2 });
+  const five = computeConfidenceScore("MEDIUM", { ...noSignals, strongFunctionCount: 5 });
   assert.equal(two, five);
 });
 
 test("the score always falls inside its label's band, so the card never says e.g. HIGH (35%)", () => {
-  const weakest = { ...noSignals, tokenBSource: "token_a_match" as const, functionCount: 1 };
-  const strongest = { tokenBSource: "static_call" as const, functionCount: 2, eventCount: 2, auxiliaryCount: 2 };
+  const weakest = { ...noSignals, tokenBSource: "token_a_match" as const, weakFunctionCount: 1 };
+  const strongest = {
+    tokenBSource: "static_call" as const,
+    strongFunctionCount: 2,
+    weakFunctionCount: 2,
+    eventCount: 2,
+    auxiliaryCount: 2,
+  };
   const bands = { LOW: [0, 39], MEDIUM: [40, 69], HIGH: [70, 100] } as const;
 
   for (const level of ["LOW", "MEDIUM", "HIGH"] as const) {
@@ -58,4 +71,21 @@ test("the score always falls inside its label's band, so the card never says e.g
       assert.ok(score >= min && score <= max, `${level} score ${score} outside ${min}-${max}`);
     }
   }
+});
+
+test("strong migration functions always count as a function signal", () => {
+  assert.equal(hasFunctionSignal(1, 0, false), true);
+  assert.equal(hasFunctionSignal(1, 0, true), true);
+});
+
+test("weak functions (claim/redeem/deposit) count only on non-token contracts", () => {
+  assert.equal(hasFunctionSignal(0, 1, false), true);
+  // e.g. USDT has redeem(uint256) but is a plain ERC-20 -> no signal
+  assert.equal(hasFunctionSignal(0, 1, true), false);
+});
+
+test("a strong function outweighs a weak one in the score", () => {
+  const strong = computeConfidenceScore("MEDIUM", { ...noSignals, strongFunctionCount: 1 });
+  const weak = computeConfidenceScore("MEDIUM", { ...noSignals, weakFunctionCount: 1 });
+  assert.ok(strong > weak);
 });

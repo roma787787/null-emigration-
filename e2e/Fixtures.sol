@@ -136,3 +136,77 @@ contract CloneFactory {
         emit Cloned(instance);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Shapes of real-world migrations (non-standard names the fixed lists miss)
+// ---------------------------------------------------------------------------
+
+/// MKR-style token: symbol()/name() return bytes32, not string.
+contract Bytes32Token {
+    bytes32 public constant symbol = "MKR";
+    bytes32 public constant name = "Maker";
+    uint256 public totalSupply;
+    address public owner;
+    mapping(address => uint256) public balanceOf;
+    constructor(uint256 supply) { owner = msg.sender; totalSupply = supply; balanceOf[msg.sender] = supply; }
+    function transfer(address to, uint256 v) external returns (bool) {
+        balanceOf[msg.sender] -= v; balanceOf[to] += v; return true;
+    }
+}
+
+/// Aave LEND->AAVE style: immutables LEND()/AAVE(), migrateFromLEND(), LendMigrated.
+contract LendStyleMigrator {
+    address public immutable LEND;
+    address public immutable AAVE;
+    uint256 public constant LEND_AAVE_RATIO = 100;
+    event LendMigrated(address indexed sender, uint256 indexed amount);
+    constructor(address lend, address aave) { LEND = lend; AAVE = aave; }
+    function migrateFromLEND(uint256 amount) external {
+        SimpleToken(LEND).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(AAVE).transfer(msg.sender, amount / LEND_AAVE_RATIO);
+        emit LendMigrated(msg.sender, amount);
+    }
+}
+
+/// Sky MKR->SKY style: mkr()/sky()/rate() immutables, mkrToSky().
+contract SkyStyleConverter {
+    address public immutable mkr;
+    address public immutable sky;
+    uint256 public immutable rate;
+    event MkrToSky(address indexed caller, address indexed usr, uint256 mkrAmt, uint256 skyAmt);
+    constructor(address mkr_, address sky_, uint256 rate_) { mkr = mkr_; sky = sky_; rate = rate_; }
+    function mkrToSky(address usr, uint256 mkrAmt) external {
+        emit MkrToSky(msg.sender, usr, mkrAmt, mkrAmt * rate);
+    }
+}
+
+/// Polygon MATIC->POL style (behind a proxy): matic()/polygonEcosystemToken(), migrate()/unmigrate().
+contract PolStyleMigration {
+    address public matic;
+    address public polygonEcosystemToken;
+    bool private initialized;
+    event Migrated(address indexed account, uint256 amount);
+    function initialize(address matic_, address pol_) external {
+        require(!initialized);
+        initialized = true;
+        matic = matic_;
+        polygonEcosystemToken = pol_;
+    }
+    function migrate(uint256 amount) external { emit Migrated(msg.sender, amount); }
+    function unmigrate(uint256 amount) external { emit Migrated(msg.sender, amount); }
+}
+
+/// USDT style: a plain ERC-20 that happens to have redeem()/issue().
+contract UsdtStyleToken {
+    string public name = "Tether USD";
+    string public symbol = "USDT";
+    uint256 public totalSupply;
+    address public owner;
+    mapping(address => uint256) public balanceOf;
+    constructor(uint256 supply) { owner = msg.sender; totalSupply = supply; balanceOf[msg.sender] = supply; }
+    function transfer(address to, uint256 v) external returns (bool) {
+        balanceOf[msg.sender] -= v; balanceOf[to] += v; return true;
+    }
+    function issue(uint256 amount) external { totalSupply += amount; balanceOf[owner] += amount; }
+    function redeem(uint256 amount) external { totalSupply -= amount; balanceOf[owner] -= amount; }
+}

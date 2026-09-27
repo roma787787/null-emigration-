@@ -1,7 +1,6 @@
 import {
   TransactionNotFoundError,
   TransactionReceiptNotFoundError,
-  zeroAddress,
   type Address,
   type Hex,
 } from "viem";
@@ -33,8 +32,8 @@ export type DeployTxAnalysis =
 export async function analyzeDeployTx(
   network: NetworkKey,
   txHash: Hex,
-  /** Picks Token A once the creator and creation inputs are known (e.g. a tracked token the creator owns); null if none. */
-  resolveTokenA: (creator: Address, creationInputs: Hex[]) => Promise<Address | null>,
+  /** Token A candidates once the creator is known (an explicit token, or tracked tokens the creator owns). */
+  resolveTokenACandidates: (creator: Address) => Promise<Address[]>,
 ): Promise<DeployTxAnalysis> {
   const client = getPublicClient(network);
 
@@ -59,12 +58,12 @@ export async function analyzeDeployTx(
 
   if (created.length === 0) return { status: "no_contract" };
 
-  const tokenAAddress = await resolveTokenA(tx.from, created.map((c) => c.input));
+  const tokenACandidates = await resolveTokenACandidates(tx.from);
   const deployments: AnalyzedDeployment[] = [];
   for (const { address, input } of created.slice(0, MAX_CONTRACTS_PER_TX)) {
     deployments.push({
       contractAddress: address,
-      analysis: await analyzeMigrationContract(network, address, input, tokenAAddress ?? zeroAddress),
+      analysis: await analyzeMigrationContract(network, address, input, tokenACandidates),
     });
   }
 

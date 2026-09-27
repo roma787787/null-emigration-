@@ -2,8 +2,8 @@ import type { Telegraf } from "telegraf";
 import { BaseError, getAddress, isAddress, isHex, type Address, type Hex } from "viem";
 import { isKnownNetwork, allNetworkKeys } from "../../config/networks.js";
 import { getPublicClient } from "../../chain/provider.js";
+import { readTokenSymbol } from "../../chain/tokenMetadata.js";
 import { analyzeDeployTx } from "../../analyzer/analyzeDeployTx.js";
-import { pickReferencedToken } from "../../analyzer/pickToken.js";
 import { tokenRepository } from "../../db/repositories/tokenRepository.js";
 import { ownerRepository } from "../../db/repositories/ownerRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
@@ -12,39 +12,27 @@ import { formatMigrationAlert } from "../notificationFormatter.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 
-const SYMBOL_ABI = [
-  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-] as const;
-
 function isTxHash(value: string): value is Hex {
   return isHex(value) && value.length === 66;
 }
 
 /**
- * Token A for the card: an explicitly given address (tracked or not), else
- * the tracked token the creator owns that the contract references (same
- * network preferred) — see pickReferencedToken.
+ * Token A candidates for the card: an explicitly given address (tracked or
+ * not), else the tracked tokens the creator owns, same network first. The
+ * analyzer then picks the one the contract actually references.
  */
-async function resolveTokenA(
-  network: NetworkKey,
-  explicit: Address | null,
-  creator: Address,
-  creationInputs: Hex[],
-): Promise<TokenRecord | null> {
+async function tokenACandidates(network: NetworkKey, explicit: Address | null, creator: Address): Promise<TokenRecord[]> {
   if (explicit) {
     const tracked = await tokenRepository.findByNetworkAndAddress(network, explicit);
-    if (tracked) return tracked;
-    const symbol = await getPublicClient(network)
-      .readContract({ address: explicit, abi: SYMBOL_ABI, functionName: "symbol" })
-      .catch(() => null);
-    return { id: 0, network, address: explicit, symbol, name: null, addedByChatId: "", createdAt: new Date() };
+    if (tracked) return [tracked];
+    const symbol = await readTokenSymbol(getPublicClient(network), explicit);
+    return [{ id: 0, network, address: explicit, symbol, name: null, addedByChatId: "", createdAt: new Date() }];
   }
 
   const tokenIds = await ownerRepository.findTokenIdsByOwnerAddress(creator);
-  const candidates = (await Promise.all(tokenIds.map((id) => tokenRepository.findById(id))))
+  return (await Promise.all(tokenIds.map((id) => tokenRepository.findById(id))))
     .filter((t): t is TokenRecord => t !== null)
     .sort((x, y) => Number(y.network === network) - Number(x.network === network));
-  return pickReferencedToken(candidates, creationInputs);
 }
 
 /**
@@ -84,10 +72,10 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
     await ctx.reply(t(lang, "analyze.working", { hash: hashArg, network }));
 
     try {
-      let tokenA: TokenRecord | null = null;
-      const result = await analyzeDeployTx(network, hashArg, async (creator, creationInputs) => {
-        tokenA = await resolveTokenA(network, explicitTokenA, creator, creationInputs);
-        return tokenA?.address ?? null;
+      let candidates: TokenRecord[] = [];
+      const result = await analyzeDeployTx(network, hashArg, async (creator) => {
+        candidates = await tokenACandidates(network, explicitTokenA, creator);
+        return candidates.map((c) => c.address);
       });
 
       if (result.status === "not_found") {
@@ -104,13 +92,16 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
       }
 
       for (const { contractAddress, analysis } of result.deployments) {
+        const { tokenAAddress, ...fields } = analysis;
+        const tokenA =
+          candidates.find((c) => tokenAAddress && c.address.toLowerCase() === tokenAAddress.toLowerCase()) ?? null;
         const record: MigrationContractRecord = {
           id: 0,
-          tokenId: (tokenA as TokenRecord | null)?.id ?? 0,
+          tokenId: tokenA?.id ?? 0,
           network,
           contractAddress,
           creatorAddress: result.creator,
-          ...analysis,
+          ...fields,
           txHash: hashArg,
           blockNumber: result.blockNumber,
           detectedAt: new Date(),

@@ -1,11 +1,16 @@
-import type { Address } from "viem";
+import { toFunctionSelector, zeroAddress, type Address, type Hex } from "viem";
 import type { ConfidenceLevel, MigrationAnalysisResult, NetworkKey, TokenBSource } from "../types/index.js";
 import { getPublicClient } from "../chain/provider.js";
-import { scanBytecodeForMigrationSelectors } from "./functionSelectors.js";
+import { migrationFunctionSelectors } from "./functionSelectors.js";
 import { scanBytecodeForMigrationEvents } from "./eventSignatures.js";
 import { probeForTokenB, probeAuxiliarySignals } from "./staticCallProbe.js";
 import { findTokenAOrBInConstructorArgs } from "./constructorArgsDecoder.js";
 import { findProxyImplementation } from "./proxyResolver.js";
+import { extractDispatcherSelectors } from "./bytecodeSelectors.js";
+import { lookupFunctionSignatures } from "./signatureLookup.js";
+import { classifyFunctionSignature } from "./functionClassifier.js";
+import { probeZeroArgTokenGetters } from "./genericTokenProbe.js";
+import { pickReferencedToken } from "./pickToken.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -22,9 +27,20 @@ export function computeConfidence(hasFunctions: boolean, hasTokenSignal: boolean
   return "LOW";
 }
 
+/**
+ * Whether the functions found amount to a migration signal. Strong names
+ * (migrate, convert, swap, xToY...) always do; weak ones (claim, redeem,
+ * deposit) only when the contract isn't itself an ERC-20 — plain tokens
+ * (USDT's redeem) and vaults use them for unrelated reasons.
+ */
+export function hasFunctionSignal(strongCount: number, weakCount: number, isToken: boolean): boolean {
+  return strongCount > 0 || (weakCount > 0 && !isToken);
+}
+
 interface ScoreInput {
   tokenBSource: TokenBSource | null;
-  functionCount: number;
+  strongFunctionCount: number;
+  weakFunctionCount: number;
   eventCount: number;
   auxiliaryCount: number;
 }
@@ -50,7 +66,8 @@ export function computeConfidenceScore(confidence: ConfidenceLevel, input: Score
   else if (input.tokenBSource === "constructor_args") evidence += 35;
   else if (input.tokenBSource === "token_a_match") evidence += 20;
 
-  evidence += Math.min(input.functionCount, 2) * 15;
+  evidence += Math.min(input.strongFunctionCount, 2) * 15;
+  evidence += Math.min(input.weakFunctionCount, 2) * 7;
   evidence += Math.min(input.eventCount, 2) * 10;
   evidence += Math.min(input.auxiliaryCount, 2) * 5;
 
@@ -58,11 +75,16 @@ export function computeConfidenceScore(confidence: ConfidenceLevel, input: Score
   return min + Math.round((Math.min(100, evidence) / 100) * (max - min));
 }
 
+const ERC20_CORE = ["totalSupply()", "balanceOf(address)", "transfer(address,uint256)"].map((s) =>
+  toFunctionSelector(s),
+);
+
 export async function analyzeMigrationContract(
   network: NetworkKey,
   contractAddress: Address,
   creationInput: `0x${string}` | string,
-  tokenAAddress: Address,
+  /** Tracked tokens this deployment could belong to, best guess first (e.g. same network). */
+  tokenACandidates: Address[],
 ): Promise<MigrationAnalysisResult> {
   const client = getPublicClient(network);
 
@@ -77,7 +99,43 @@ export async function analyzeMigrationContract(
   // Scan the proxy and its implementation together: for a proxied migrator,
   // migrate()/Migrated live only in the implementation's bytecode.
   const bytecode = (proxyCode ?? "") + (implementationCode?.slice(2) ?? "");
-  const matchedFunctions = bytecode ? scanBytecodeForMigrationSelectors(bytecode) : [];
+
+  // Token A is the candidate the contract references — in its deploy input,
+  // or (for a proxy) inlined as an immutable in the implementation's code.
+  const tokenAAddress =
+    pickReferencedToken(
+      tokenACandidates.map((address) => ({ address })),
+      [creationInput, proxyCode ?? "", implementationCode ?? ""],
+    )?.address ?? zeroAddress;
+
+  const selectors: Hex[] = [
+    ...new Set([
+      ...extractDispatcherSelectors(proxyCode ?? "0x"),
+      ...extractDispatcherSelectors(implementationCode ?? "0x"),
+    ]),
+  ];
+  const signatures = await lookupFunctionSignatures(selectors);
+
+  // Candidate functions: our built-in list (matched anywhere in the bytecode,
+  // works offline) plus every dispatcher function the signature DB names.
+  const functionsBySelector = new Map<string, string>();
+  const lowerCode = bytecode.toLowerCase();
+  for (const { signature, selector } of migrationFunctionSelectors) {
+    if (lowerCode.includes(selector.slice(2))) functionsBySelector.set(selector, signature);
+  }
+  for (const [selector, signature] of signatures) functionsBySelector.set(selector, signature);
+
+  const isToken = ERC20_CORE.every((s) => selectors.includes(s));
+  const strong: string[] = [];
+  const weak: string[] = [];
+  for (const signature of new Set(functionsBySelector.values())) {
+    const strength = classifyFunctionSignature(signature);
+    if (strength === "strong") strong.push(signature);
+    else if (strength === "weak") weak.push(signature);
+  }
+  // Weak names on an ERC-20 (e.g. USDT's redeem) are noise — not shown, not counted.
+  const countedWeak = isToken ? [] : weak;
+  const matchedFunctions = [...strong, ...countedWeak];
   const matchedEvents = bytecode ? scanBytecodeForMigrationEvents(bytecode) : [];
 
   const matchedAuxiliary = await probeAuxiliarySignals(client, contractAddress).catch((err) => {
@@ -92,7 +150,23 @@ export async function analyzeMigrationContract(
 
   let tokenBAddress = staticProbe.tokenBAddress;
   let tokenBSource: TokenBSource | null = tokenBAddress ? "static_call" : null;
-  const matchedGetter = staticProbe.matchedGetter;
+  let matchedGetter = staticProbe.matchedGetter;
+
+  // A token's own getters point at pairs, routers and the like — only probe
+  // arbitrary getters on contracts that aren't ERC-20s themselves.
+  if (!tokenBAddress && !isToken) {
+    const generic = await probeZeroArgTokenGetters(client, contractAddress, selectors, signatures, tokenAAddress).catch(
+      (err) => {
+        logger.warn({ err, network, contractAddress }, "Generic getter probe failed");
+        return null;
+      },
+    );
+    if (generic) {
+      tokenBAddress = generic.tokenBAddress;
+      tokenBSource = "static_call";
+      matchedGetter = generic.getter;
+    }
+  }
 
   if (!tokenBAddress) {
     const constructorMatch = await findTokenAOrBInConstructorArgs(client, creationInput, tokenAAddress).catch(
@@ -112,15 +186,17 @@ export async function analyzeMigrationContract(
   }
 
   const hasTokenSignal = tokenBAddress !== null || tokenBSource === "token_a_match";
-  const confidence = computeConfidence(matchedFunctions.length > 0, hasTokenSignal);
+  const confidence = computeConfidence(hasFunctionSignal(strong.length, weak.length, isToken), hasTokenSignal);
   const confidenceScore = computeConfidenceScore(confidence, {
     tokenBSource,
-    functionCount: matchedFunctions.length,
+    strongFunctionCount: strong.length,
+    weakFunctionCount: countedWeak.length,
     eventCount: matchedEvents.length,
     auxiliaryCount: matchedAuxiliary.length,
   });
 
   return {
+    tokenAAddress: tokenAAddress === zeroAddress ? null : tokenAAddress,
     confidence,
     confidenceScore,
     tokenBAddress,

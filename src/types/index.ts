@@ -64,6 +64,8 @@ export interface ChatSettingsRecord {
 export type TokenBSource = "constructor_args" | "static_call" | "token_a_match";
 
 export interface MigrationAnalysisResult {
+  /** Which of the candidate Token A addresses the contract was attributed to (null if none given). */
+  tokenAAddress: `0x${string}` | null;
   confidence: ConfidenceLevel;
   confidenceScore: number;
   tokenBAddress: `0x${string}` | null;
