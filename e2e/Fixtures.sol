@@ -159,6 +159,9 @@ contract LendStyleMigrator {
     address public immutable LEND;
     address public immutable AAVE;
     uint256 public constant LEND_AAVE_RATIO = 100;
+    // Like Aave's real migrator: a small uint getter whose value (3) is also
+    // the address of the RIPEMD-160 precompile, which answers any call.
+    uint256 public constant REVISION = 3;
     event LendMigrated(address indexed sender, uint256 indexed amount);
     constructor(address lend, address aave) { LEND = lend; AAVE = aave; }
     function migrateFromLEND(uint256 amount) external {

@@ -1,4 +1,4 @@
-import { getAddress, isAddressEqual, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
+import { getAddress, isAddressEqual, type Address, type Hex, type PublicClient } from "viem";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 
 const MAX_CALLS = 60;
@@ -8,6 +8,11 @@ const CONCURRENCY = 8;
 const TOTAL_SUPPLY_ABI = [
   { type: "function", name: "totalSupply", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
 ] as const;
+
+// Getters returning small integers (a version, a ratio, a count) look like
+// addresses such as 0x...03 — precompiles that answer any call — so every
+// value below this bound is treated as a number, not a token.
+const MIN_ADDRESS_VALUE = 2n ** 32n;
 
 // LP tokens (e.g. a DEX pair a new token creates) are ERC-20s but never a migration target.
 const LP_SYMBOL = /UNI-V2|Cake-LP|SLP|(^|-)LP(-|$)/i;
@@ -26,8 +31,8 @@ function takesNoArguments(signature: string | undefined): boolean {
 
 function addressFromReturn(data: Hex | undefined): Address | null {
   if (!data || data.length !== 66 || !/^0x0{24}/.test(data)) return null;
-  const address = getAddress(`0x${data.slice(26)}`);
-  return isAddressEqual(address, zeroAddress) ? null : address;
+  if (BigInt(data) < MIN_ADDRESS_VALUE) return null;
+  return getAddress(`0x${data.slice(26)}`);
 }
 
 async function mapLimited<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -46,6 +51,9 @@ async function mapLimited<T, R>(items: T[], fn: (item: T) => Promise<R>): Promis
 
 async function isErc20(client: PublicClient, address: Address): Promise<boolean> {
   try {
+    // Precompiles and EOAs have no code but can still return data from eth_call.
+    const code = await client.getCode({ address });
+    if (!code || code === "0x") return false;
     await client.readContract({ address, abi: TOTAL_SUPPLY_ABI, functionName: "totalSupply" });
   } catch {
     return false;

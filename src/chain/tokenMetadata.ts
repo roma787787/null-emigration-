@@ -7,6 +7,8 @@ const stringAbi = (field: Field) =>
 const bytes32Abi = (field: Field) =>
   [{ type: "function", name: field, stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] }] as const;
 
+const PRINTABLE = /^[\x20-\x7E]{1,32}$/;
+
 /**
  * Reads an ERC-20 `symbol()` / `name()`, accepting both the standard
  * `string` return and the legacy `bytes32` one used by early tokens such as
@@ -22,7 +24,9 @@ export async function readTokenText(client: PublicClient, address: Address, fiel
   try {
     const raw = await client.readContract({ address, abi: bytes32Abi(field), functionName: field });
     const text = hexToString(raw, { size: 32 }).replace(/\0+$/, "").trim();
-    return text || null;
+    // A real bytes32 symbol/name is readable text; arbitrary 32-byte data
+    // (e.g. a hash) is not, and must not pass as a token symbol.
+    return PRINTABLE.test(text) ? text : null;
   } catch {
     return null;
   }

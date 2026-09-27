@@ -33,7 +33,7 @@ process.env.NODE_ENV = "production";
 // Local stand-in for the public 4-byte signature DB (same response shape as
 // api.4byte.sourcify.dev), so function-name recognition runs offline too.
 const KNOWN_SIGNATURES = [
-  "migrateFromLEND(uint256)", "LEND()", "AAVE()", "LEND_AAVE_RATIO()",
+  "migrateFromLEND(uint256)", "LEND()", "AAVE()", "LEND_AAVE_RATIO()", "REVISION()",
   "mkrToSky(address,uint256)", "mkr()", "sky()", "rate()",
   "migrate(uint256)", "unmigrate(uint256)", "matic()", "polygonEcosystemToken()", "initialize(address,address)",
   "redeem(uint256)", "issue(uint256)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
@@ -73,6 +73,7 @@ const { enqueueContractCreation, startContractCreationWorker, getContractCreatio
 const { formatMigrationAlert } = await import("../src/telegram/notificationFormatter.js");
 const { analyzeDeployTx } = await import("../src/analyzer/analyzeDeployTx.js");
 const { readTokenSymbol } = await import("../src/chain/tokenMetadata.js");
+const { probeZeroArgTokenGetters } = await import("../src/analyzer/genericTokenProbe.js");
 
 const rpc = http("http://127.0.0.1:8545");
 const chainClient = createPublicClient({ chain: foundry, transport: rpc });
@@ -301,6 +302,16 @@ for (const check of analyzeChecks) {
   if (problem) failures++;
   console.log(`${problem ? "FAIL" : "ok  "} ${check.label}${problem ? "  <- " + problem : ""}`);
 }
+
+// Aave's real migrator exposes REVISION() = 3, i.e. the RIPEMD-160
+// precompile's address, which answers totalSupply()/symbol() with a hash.
+// Probing only that getter must not turn a precompile into "Token B".
+const revisionSelector = toFunctionSelector("REVISION()");
+const precompilePick = await probeZeroArgTokenGetters(
+  chainClient as never, lendImpl.address, [revisionSelector], new Map([[revisionSelector, "REVISION()"]]), oldToken.address,
+);
+if (precompilePick) { failures++; console.log(`FAIL precompile accepted as Token B: ${precompilePick.tokenBAddress} via ${precompilePick.getter}`); }
+else console.log("ok   REVISION() = 3 (precompile 0x03) rejected as Token B");
 
 if (mkrSymbol !== "MKR") { failures++; console.log(`FAIL bytes32 symbol read as ${mkrSymbol}, expected MKR`); }
 else console.log("ok   bytes32 symbol() read as MKR");
