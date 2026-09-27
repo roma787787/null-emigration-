@@ -21,10 +21,25 @@ function tokenBSourceLabel(lang: Language, migration: MigrationContractRecord): 
   }
 }
 
+const MAX_FUNCTIONS_SHOWN = 3;
+
+/**
+ * Action functions (ones taking arguments, e.g. migrateFromLEND(uint256))
+ * first, then zero-arg state getters like migrationEnded(); original order
+ * is kept within each group.
+ */
+export function orderFunctionsForDisplay(functions: string[]): string[] {
+  const takesArgs = (signature: string) => !signature.endsWith("()");
+  return [...functions.filter(takesArgs), ...functions.filter((f) => !takesArgs(f))];
+}
+
 function foundSignals(lang: Language, migration: MigrationContractRecord): string[] {
   const signals: string[] = [];
 
-  for (const fn of migration.matchedFunctions) signals.push(`${t(lang, "card.functionWord")} ${fn}`);
+  const functions = orderFunctionsForDisplay(migration.matchedFunctions);
+  for (const fn of functions.slice(0, MAX_FUNCTIONS_SHOWN)) signals.push(`${t(lang, "card.functionWord")} ${fn}`);
+  const hidden = functions.length - MAX_FUNCTIONS_SHOWN;
+  if (hidden > 0) signals.push(t(lang, "card.moreFunctions", { count: String(hidden) }));
   for (const ev of migration.matchedEvents) signals.push(`${t(lang, "card.eventWord")} ${ev}`);
   if (migration.tokenBSource === "static_call" && migration.matchedGetter) {
     signals.push(`${t(lang, "card.variableWord")} ${migration.matchedGetter}`);

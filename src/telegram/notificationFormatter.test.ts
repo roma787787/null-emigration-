@@ -96,3 +96,20 @@ test("manual /analyze mode: neutral title, no owner claim, and handles an unknow
   assert.doesNotMatch(text, /Deployer \/ Owner/);
   assert.match(text, /Token A: _not specified_/);
 });
+
+test("lists action functions first and caps the function list", () => {
+  const text = formatMigrationAlert(
+    token,
+    migration({
+      matchedFunctions: [
+        "migrationEnded()", "_totalLendMigrated()", "migrateFromLEND(uint256)", "migrationStarted()", "migrationPaused()",
+      ],
+    }),
+    "en",
+  );
+
+  const found = text.split("\n").find((line) => line.includes("migrateFromLEND"))!;
+  assert.ok(found.indexOf("migrateFromLEND") < found.indexOf("migrationEnded"));
+  assert.ok(!found.includes("migrationStarted"));
+  assert.ok(found.includes("\\+2 more"));
+});
