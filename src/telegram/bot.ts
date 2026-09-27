@@ -5,6 +5,7 @@ import { registerRemoveTokenCommand } from "./commands/removeToken.js";
 import { registerAddOwnerCommand } from "./commands/addOwner.js";
 import { registerRemoveOwnerCommand } from "./commands/removeOwner.js";
 import { registerSettingsCommand } from "./commands/settings.js";
+import { registerAnalyzeCommand } from "./commands/analyze.js";
 import { registerCallbacks } from "./callbacks.js";
 import { registerAccessControl, isAdminChat } from "./accessControl.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
@@ -25,6 +26,7 @@ export function createBot(token: string): Telegraf {
   registerAddOwnerCommand(bot);
   registerRemoveOwnerCommand(bot);
   registerSettingsCommand(bot);
+  registerAnalyzeCommand(bot);
   registerCallbacks(bot);
 
   bot.catch((err, ctx) => {

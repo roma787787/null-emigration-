@@ -87,3 +87,12 @@ test("escapes MarkdownV2 special characters in the token symbol", () => {
 
   assert.match(text, /A\\\.B\\_C/);
 });
+
+test("manual /analyze mode: neutral title, no owner claim, and handles an unknown Token A", () => {
+  const text = formatMigrationAlert(null, migration(), "en", { manual: true });
+
+  assert.match(text, /CONTRACT ANALYSIS/);
+  assert.doesNotMatch(text, /MIGRATION CONTRACT DETECTED/);
+  assert.doesNotMatch(text, /Deployer \/ Owner/);
+  assert.match(text, /Token A: _not specified_/);
+});

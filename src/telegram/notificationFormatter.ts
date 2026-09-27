@@ -34,14 +34,26 @@ function foundSignals(lang: Language, migration: MigrationContractRecord): strin
   return signals;
 }
 
+interface FormatOptions {
+  /** An on-demand /analyze result rather than a live detection: neutral title, no owner claim about the creator. */
+  manual?: boolean;
+}
+
 /**
  * Renders the alert card described in spec section 4.4, using MarkdownV2, in
- * the receiving chat's chosen language.
+ * the receiving chat's chosen language. `token` is null when /analyze was run
+ * without a known Token A.
  */
-export function formatMigrationAlert(token: TokenRecord, migration: MigrationContractRecord, lang: Language): string {
-  const network = getNetwork(token.network);
-  const symbol = token.symbol ? escapeMd(token.symbol) : "UNKNOWN";
-  const tokenA = `${symbol} \\(${escapeMd(shorten(token.address))}\\)`;
+export function formatMigrationAlert(
+  token: TokenRecord | null,
+  migration: MigrationContractRecord,
+  lang: Language,
+  options: FormatOptions = {},
+): string {
+  const network = getNetwork(migration.network);
+  const tokenA = token
+    ? `${token.symbol ? escapeMd(token.symbol) : "UNKNOWN"} \\(${escapeMd(shorten(token.address))}\\)`
+    : `_${escapeMd(t(lang, "card.tokenAUnknown"))}_`;
   const creator = escapeMd(shorten(migration.creatorAddress));
   const contract = escapeMd(migration.contractAddress);
 
@@ -64,14 +76,19 @@ export function formatMigrationAlert(token: TokenRecord, migration: MigrationCon
 
   const confidenceEmoji = migration.confidence === "HIGH" ? "🟢" : migration.confidence === "MEDIUM" ? "🟡" : "⚪️";
 
+  const title = options.manual
+    ? `🔎 *${escapeMd(t(lang, "card.titleManual"))}*`
+    : `🚨 *${escapeMd(t(lang, "card.title"))}* 🚨`;
+  const creatorRole = options.manual ? "" : ` \\(${escapeMd(t(lang, "card.deployerOwner"))}\\)`;
+
   return [
-    `🚨 *${escapeMd(t(lang, "card.title"))}* 🚨`,
+    title,
     "",
     `📍 ${escapeMd(t(lang, "card.network"))}: ${escapeMd(network.label)}`,
     `🪙 ${escapeMd(t(lang, "card.tokenA"))}: ${tokenA}`,
-    `👤 ${escapeMd(t(lang, "card.creator"))}: ${creator} \\(${escapeMd(t(lang, "card.deployerOwner"))}\\)`,
+    `👤 ${escapeMd(t(lang, "card.creator"))}: ${creator}${creatorRole}`,
     "",
-    `📄 ${escapeMd(t(lang, "card.newContract"))}`,
+    `📄 ${escapeMd(t(lang, options.manual ? "card.contract" : "card.newContract"))}`,
     contract,
     "",
     `🎯 ${escapeMd(t(lang, "card.targetToken"))}`,

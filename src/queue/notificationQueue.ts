@@ -2,6 +2,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import { createRedisConnection } from "./redisClient.js";
 import type { MigrationContractRecord, NetworkKey, TokenRecord } from "../types/index.js";
 import { analyzeMigrationContract } from "../analyzer/migrationAnalyzer.js";
+import { pickReferencedToken } from "../analyzer/pickToken.js";
 import { migrationContractRepository } from "../db/repositories/migrationContractRepository.js";
 import { tokenRepository } from "../db/repositories/tokenRepository.js";
 import type { TrackedContractCreationEvent } from "../chain/blockListener.js";
@@ -17,7 +18,10 @@ export interface ContractCreationJobData {
   txHash: `0x${string}`;
   blockNumber: string;
   input: `0x${string}`;
-  tokenId: number;
+  /** Every tracked token the creator owns; the worker picks the one the contract references. */
+  tokenIds: number[];
+  /** Pre-tokenIds job payloads still sitting in Redis from an older deploy. */
+  tokenId?: number;
 }
 
 let queue: Queue<ContractCreationJobData> | undefined;
@@ -31,11 +35,7 @@ export function getContractCreationQueue(): Queue<ContractCreationJobData> {
 
 export async function enqueueContractCreation(event: TrackedContractCreationEvent): Promise<void> {
   const q = getContractCreationQueue();
-  // A single deployment maps to one migration_contracts row (network, address
-  // is unique); if the deployer happens to be a tracked owner of more than
-  // one token, we attribute the event to the first match.
-  const tokenId = event.tokenIds[0];
-  if (tokenId === undefined) return;
+  if (event.tokenIds.length === 0) return;
 
   await q.add(
     "analyze",
@@ -46,7 +46,7 @@ export async function enqueueContractCreation(event: TrackedContractCreationEven
       txHash: event.txHash,
       blockNumber: event.blockNumber.toString(),
       input: event.input,
-      tokenId,
+      tokenIds: event.tokenIds,
     },
     {
       // BullMQ rejects custom job ids containing ":" (its own key separator).
@@ -76,9 +76,16 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
         return;
       }
 
-      const token = await tokenRepository.findById(data.tokenId);
+      // A deployment maps to one migration_contracts row, so when the creator
+      // owns several tracked tokens it's attributed to the one the contract
+      // references, preferring tokens on the same network.
+      const tokenIds = data.tokenIds ?? (data.tokenId !== undefined ? [data.tokenId] : []);
+      const candidates = (await Promise.all(tokenIds.map((id) => tokenRepository.findById(id))))
+        .filter((t): t is TokenRecord => t !== null)
+        .sort((x, y) => Number(y.network === data.network) - Number(x.network === data.network));
+      const token = pickReferencedToken(candidates, [data.input]);
       if (!token) {
-        logger.warn({ tokenId: data.tokenId }, "Token no longer tracked, dropping job");
+        logger.warn({ tokenIds }, "Tokens no longer tracked, dropping job");
         return;
       }
 

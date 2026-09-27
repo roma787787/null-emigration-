@@ -25,6 +25,7 @@ const en: Dict = {
     "/remove_token <address> — stop tracking a token (asks to confirm)\n" +
     "/add_owner <network> <token> <owner> — manually link an extra wallet (dev, multisig) to a tracked token\n" +
     "/remove_owner <network> <token> <owner> — unlink a manually-added wallet\n" +
+    "/analyze <network> <deploy_tx_hash> — check any already-deployed contract for migration signs\n" +
     "/settings — toggle which confidence level / networks alert this chat\n" +
     "/language — change the bot's language\n" +
     "/help — show this message again",
@@ -47,6 +48,13 @@ const en: Dict = {
   "addToken.lookingUp": "Looking up {address} on {network}...",
   "addToken.success": "✅ Now tracking {symbol} ({address}) on {network}.\n\nDiscovered owners/admins:\n{owners}",
   "addToken.refreshed": "ℹ️ {symbol} ({address}) on {network} is already tracked — owners re-checked.\n\nDiscovered owners/admins:\n{owners}",
+  "analyze.usage": "Usage: /analyze <network> <deploy_tx_hash> [token_a_address]\nTake the hash of the transaction that created the contract — on the explorer's contract page it's linked in the \"Contract Creator\" field.\nSupported networks: {networks}",
+  "analyze.invalidHash": "\"{hash}\" is not a transaction hash (0x followed by 64 hex characters).",
+  "analyze.working": "🔎 Analyzing {hash} on {network}...",
+  "analyze.notFound": "Transaction {hash} was not found on {network} — check the network and the hash.",
+  "analyze.reverted": "That transaction failed (reverted), so it didn't create a contract.",
+  "analyze.noContract": "That transaction didn't create a contract. If it deployed one through a factory, the {network} RPC must support debug_traceTransaction for the bot to see it.",
+  "analyze.failed": "Analysis failed: {error}",
   "addToken.ownersNone": "  • None found automatically — you can link wallets manually later.",
   "addToken.defaultSymbol": "token",
 
@@ -90,6 +98,9 @@ const en: Dict = {
   "settings.cbUnknownNetwork": "Unknown network",
 
   "card.title": "MIGRATION CONTRACT DETECTED",
+  "card.titleManual": "CONTRACT ANALYSIS",
+  "card.tokenAUnknown": "not specified",
+  "card.contract": "Contract:",
   "card.network": "Network",
   "card.tokenA": "Token A",
   "card.creator": "Creator",
@@ -126,6 +137,7 @@ const uk: Dict = {
     "/remove_token <адреса> — прибрати токен з відстеження (з підтвердженням)\n" +
     "/add_owner <мережа> <токен> <власник> — вручну прив'язати гаманець (розробник, мультисиг) до токена\n" +
     "/remove_owner <мережа> <токен> <власник> — відв'язати вручну доданий гаманець\n" +
+    "/analyze <мережа> <хеш_деплою> — перевірити будь-який уже задеплоєний контракт на ознаки міграції\n" +
     "/settings — перемкнути рівень впевненості / мережі для алертів у цьому чаті\n" +
     "/language — змінити мову бота\n" +
     "/help — показати це повідомлення знову",
@@ -148,6 +160,13 @@ const uk: Dict = {
   "addToken.lookingUp": "Шукаю {address} у мережі {network}...",
   "addToken.success": "✅ Тепер відстежую {symbol} ({address}) у мережі {network}.\n\nЗнайдені власники/адміни:\n{owners}",
   "addToken.refreshed": "ℹ️ {symbol} ({address}) у мережі {network} вже відстежується — власників перевірено заново.\n\nЗнайдені власники/адміни:\n{owners}",
+  "analyze.usage": "Використання: /analyze <мережа> <хеш_транзакції_деплою> [адреса_токена_A]\nВізьміть хеш транзакції, яка створила контракт — на сторінці контракту в експлорері він у полі \"Contract Creator\".\nПідтримувані мережі: {networks}",
+  "analyze.invalidHash": "\"{hash}\" не є хешем транзакції (0x і 64 шістнадцяткові символи).",
+  "analyze.working": "🔎 Аналізую {hash} у мережі {network}...",
+  "analyze.notFound": "Транзакцію {hash} не знайдено в мережі {network} — перевірте мережу та хеш.",
+  "analyze.reverted": "Ця транзакція завершилася з помилкою (reverted), тож контракт не створила.",
+  "analyze.noContract": "Ця транзакція не створила контракт. Якщо контракт створено через фабрику, RPC мережі {network} має підтримувати debug_traceTransaction, щоб бот його побачив.",
+  "analyze.failed": "Аналіз не вдався: {error}",
   "addToken.ownersNone": "  • Автоматично нікого не знайдено — гаманці можна прив'язати вручну пізніше.",
   "addToken.defaultSymbol": "токен",
 
@@ -192,6 +211,9 @@ const uk: Dict = {
   "settings.cbUnknownNetwork": "Невідома мережа",
 
   "card.title": "ВИЯВЛЕНО КОНТРАКТ МІГРАЦІЇ",
+  "card.titleManual": "АНАЛІЗ КОНТРАКТУ",
+  "card.tokenAUnknown": "не вказано",
+  "card.contract": "Контракт:",
   "card.network": "Мережа",
   "card.tokenA": "Токен A",
   "card.creator": "Створювач",
@@ -228,6 +250,7 @@ const ru: Dict = {
     "/remove_token <адрес> — убрать токен из отслеживания (с подтверждением)\n" +
     "/add_owner <сеть> <токен> <владелец> — вручную привязать кошелёк (разработчик, мультисиг) к токену\n" +
     "/remove_owner <сеть> <токен> <владелец> — отвязать вручную добавленный кошелёк\n" +
+    "/analyze <сеть> <хеш_деплоя> — проверить любой уже задеплоенный контракт на признаки миграции\n" +
     "/settings — переключить уровень уверенности / сети для алертов в этом чате\n" +
     "/language — сменить язык бота\n" +
     "/help — показать это сообщение снова",
@@ -250,6 +273,13 @@ const ru: Dict = {
   "addToken.lookingUp": "Ищу {address} в сети {network}...",
   "addToken.success": "✅ Теперь отслеживаю {symbol} ({address}) в сети {network}.\n\nНайденные владельцы/админы:\n{owners}",
   "addToken.refreshed": "ℹ️ {symbol} ({address}) в сети {network} уже отслеживается — владельцы перепроверены.\n\nНайденные владельцы/админы:\n{owners}",
+  "analyze.usage": "Использование: /analyze <сеть> <хеш_транзакции_деплоя> [адрес_токена_A]\nВозьмите хеш транзакции, которая создала контракт — на странице контракта в обозревателе он в поле \"Contract Creator\".\nПоддерживаемые сети: {networks}",
+  "analyze.invalidHash": "\"{hash}\" не является хешем транзакции (0x и 64 шестнадцатеричных символа).",
+  "analyze.working": "🔎 Анализирую {hash} в сети {network}...",
+  "analyze.notFound": "Транзакция {hash} не найдена в сети {network} — проверьте сеть и хеш.",
+  "analyze.reverted": "Эта транзакция завершилась с ошибкой (reverted), поэтому контракт не создала.",
+  "analyze.noContract": "Эта транзакция не создала контракт. Если контракт создан через фабрику, RPC сети {network} должен поддерживать debug_traceTransaction, чтобы бот его увидел.",
+  "analyze.failed": "Анализ не удался: {error}",
   "addToken.ownersNone": "  • Автоматически никого не найдено — кошельки можно привязать вручную позже.",
   "addToken.defaultSymbol": "токен",
 
@@ -294,6 +324,9 @@ const ru: Dict = {
   "settings.cbUnknownNetwork": "Неизвестная сеть",
 
   "card.title": "ОБНАРУЖЕН КОНТРАКТ МИГРАЦИИ",
+  "card.titleManual": "АНАЛИЗ КОНТРАКТА",
+  "card.tokenAUnknown": "не указан",
+  "card.contract": "Контракт:",
   "card.network": "Сеть",
   "card.tokenA": "Токен A",
   "card.creator": "Создатель",
