@@ -5,6 +5,7 @@ import { scanBytecodeForMigrationSelectors } from "./functionSelectors.js";
 import { scanBytecodeForMigrationEvents } from "./eventSignatures.js";
 import { probeForTokenB, probeAuxiliarySignals } from "./staticCallProbe.js";
 import { findTokenAOrBInConstructorArgs } from "./constructorArgsDecoder.js";
+import { findProxyImplementation } from "./proxyResolver.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -65,7 +66,17 @@ export async function analyzeMigrationContract(
 ): Promise<MigrationAnalysisResult> {
   const client = getPublicClient(network);
 
-  const bytecode = await client.getCode({ address: contractAddress });
+  const proxyCode = await client.getCode({ address: contractAddress });
+  const implementation = proxyCode
+    ? await findProxyImplementation(client, contractAddress, proxyCode).catch((err) => {
+        logger.warn({ err, network, contractAddress }, "Proxy implementation lookup failed");
+        return null;
+      })
+    : null;
+  const implementationCode = implementation ? await client.getCode({ address: implementation }) : undefined;
+  // Scan the proxy and its implementation together: for a proxied migrator,
+  // migrate()/Migrated live only in the implementation's bytecode.
+  const bytecode = (proxyCode ?? "") + (implementationCode?.slice(2) ?? "");
   const matchedFunctions = bytecode ? scanBytecodeForMigrationSelectors(bytecode) : [];
   const matchedEvents = bytecode ? scanBytecodeForMigrationEvents(bytecode) : [];
 

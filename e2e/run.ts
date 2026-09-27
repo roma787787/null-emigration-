@@ -3,7 +3,7 @@
 // plus Postgres and Redis — see README "End-to-end test".
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { createWalletClient, createPublicClient, http, type Abi, type Address, type Hex } from "viem";
+import { createWalletClient, createPublicClient, encodeFunctionData, http, type Abi, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
@@ -134,6 +134,31 @@ const callHash = await owner.writeContract({
 await chainClient.waitForTransactionReceipt({ hash: callHash });
 sentAt.set(predicted.toLowerCase(), t0);
 cases.push({ label: "CREATE2 child via factory call", address: predicted, expect: { detected: true, confidence: "HIGH", tokenB: newToken.address, attributedToTokenA: true } });
+
+// Proxies: the migrate()/Migrated code lives only in the implementation.
+const impl = await run("proxy implementation (uninitialized logic)", owner, "MigratorUpgradeable", [], {
+  detected: true, confidence: "MEDIUM", tokenB: null,
+});
+const initData = encodeFunctionData({
+  abi: artifacts.MigratorUpgradeable!.abi, functionName: "initialize", args: [oldToken.address, newToken.address],
+});
+await run("EIP-1967 proxy initialized with (A, B)", owner, "SimpleProxy", [impl.address, initData], {
+  detected: true, confidence: "HIGH", tokenB: newToken.address, source: "static_call", attributedToTokenA: true,
+});
+const cloneFactory = await run("clone factory contract itself", owner, "CloneFactory", [], { detected: true, confidence: "LOW" });
+const { abi: cloneAbi } = artifacts.CloneFactory!;
+const clonePredicted = (
+  await chainClient.simulateContract({
+    account: owner.account, address: cloneFactory.address, abi: cloneAbi, functionName: "clone", args: [impl.address],
+  })
+).result as Address;
+const tClone = Date.now();
+const cloneHash = await owner.writeContract({
+  address: cloneFactory.address, abi: cloneAbi, functionName: "clone", args: [impl.address],
+} as never);
+await chainClient.waitForTransactionReceipt({ hash: cloneHash });
+sentAt.set(clonePredicted.toLowerCase(), tClone);
+cases.push({ label: "EIP-1167 clone of the migrator (via factory)", address: clonePredicted, expect: { detected: true, confidence: "MEDIUM", tokenB: null } });
 
 // --- wait & report ------------------------------------------------------------
 const expectedDetections = cases.filter((c) => c.expect.detected).length;

@@ -76,3 +76,63 @@ contract MigratorFactory {
         emit Deployed(m);
     }
 }
+
+/// Case 6: migrator logic meant to sit behind a proxy (storage set via initialize).
+contract MigratorUpgradeable {
+    address public oldToken;
+    address public newToken;
+    bool private initialized;
+    event Migrated(address indexed user, uint256 amount);
+    function initialize(address a, address b) external {
+        require(!initialized);
+        initialized = true;
+        oldToken = a;
+        newToken = b;
+    }
+    function migrate(uint256 amount) external {
+        SimpleToken(oldToken).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(newToken).transfer(msg.sender, amount);
+        emit Migrated(msg.sender, amount);
+    }
+}
+
+/// Minimal EIP-1967 proxy: its own bytecode is just a delegatecall stub.
+contract SimpleProxy {
+    bytes32 private constant IMPL_SLOT = bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1);
+    constructor(address impl, bytes memory initData) {
+        bytes32 slot = IMPL_SLOT;
+        assembly { sstore(slot, impl) }
+        if (initData.length > 0) {
+            (bool ok, ) = impl.delegatecall(initData);
+            require(ok);
+        }
+    }
+    fallback() external payable {
+        bytes32 slot = IMPL_SLOT;
+        assembly {
+            let impl := sload(slot)
+            calldatacopy(0, 0, calldatasize())
+            let result := delegatecall(gas(), impl, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            switch result
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
+        }
+    }
+}
+
+/// EIP-1167 minimal-proxy ("clone") factory, as in OpenZeppelin Clones.
+contract CloneFactory {
+    event Cloned(address instance);
+    function clone(address impl) external returns (address instance) {
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
+            mstore(add(ptr, 0x14), shl(0x60, impl))
+            mstore(add(ptr, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+            instance := create(0, ptr, 0x37)
+        }
+        require(instance != address(0));
+        emit Cloned(instance);
+    }
+}
