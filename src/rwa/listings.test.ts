@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ListingBatcher, type ListingBatch, type RwaListing } from "./listings.js";
 import { formatListingAlert } from "../telegram/listingFormatter.js";
-import { markdownV2Problem } from "../../e2e/markdownV2.js";
+import { markdownV2Problem } from "../telegram/markdownV2.js";
 
 const listing = (i: number, issuer = "Robinhood Stock Tokens"): RwaListing => ({
   network: "robinhood",
