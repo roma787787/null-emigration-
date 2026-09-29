@@ -121,6 +121,11 @@ npm run dev                # or: npm run build && npm start
   `OKX_PROJECT_ID`) — OKX Web3 / DEX API credentials for the liquidity test.
   `AUTO_REQUIRE_LIQUIDITY=false` sends auto alerts even when the test
   couldn't run (not recommended: that's what filters the spam).
+- `OKX_MIN_INTERVAL_MS` — optional (default `1100`); OKX rate-limits DEX
+  API keys (error 50011), so quotes go out one at a time this far apart and
+  a 50011 is waited out and retried. `/status` shows cached OKX health
+  (refreshed in the background every 10 min) instead of querying each time.
+- `AUTO_DEDUP_HOURS` — optional (default `24`, `0` disables).
 - `QUOTE_TOKEN_<NETWORK>` — optional override of the stablecoin the test
   swaps from, `<address>:<decimals>[:<symbol>]` (defaults: USDT, or USDC /
   USDB / USDT0 where that's the chain's main dollar).
@@ -162,9 +167,16 @@ find migrations. For every block on every enabled network:
    (Geth-style) or `trace_block` (Erigon/Parity-style), whichever the RPC
    offers. If neither works the network is paused for tracing for 6h and
    `/status` says so; direct deployments are still covered.
-2. **Signature gate** — kept only if the dispatcher has a migration-style
-   function (`migrate*`, `convert*`, `swap*`, `xToY`) or an `oldToken()`-style
-   getter. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
+2. **Signature gate** — kept only if the dispatcher has a `migrate*` /
+   `convert*` function, an `oldToken()`-style getter (`oldToken`,
+   `legacyToken`, `previousToken`, `v1Token`…; not `tokenIn`/`fromToken`,
+   which every swap bot has), or an `xToY` converter whose x and y are its own
+   token getters. `swap*`/`exchange*` alone never qualify — bots, zaps and
+   presales are full of them — except a bare `swap(uint256)` /
+   `exchange(uint256)` ("TokenSwap" migrators), which is then alerted only if
+   Token B has no DEX market yet (a new token; a bot trades two liquid ones).
+   A candidate also needs a Token B (address, or ticker → Unverified); one
+   without is re-checked later. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
    ERC-20s whose only "swap" is fee plumbing (`swapTokensForEth`), contracts
    that reference no other token.
 3. **Token A / Token B by address only** — every ERC-20 the contract returns
@@ -186,7 +198,9 @@ find migrations. For every block on every enabled network:
    chosen per chat in `/settings`. No route / too much impact / honeypot =
    dropped. Results are cached per token for 5 minutes; an OKX outage is
    retried rather than cached.
-5. **Alert** to every approved chat that has auto alerts on and whose level
+5. **Dedup** — the same token pair, or the same contract code (clones, bot
+   fleets), alerts once per `AUTO_DEDUP_HOURS` (default 24).
+6. **Alert** to every approved chat that has auto alerts on and whose level
    the token passes. The card shows the source (auto-discovery), Token A's
    full address, and the test swaps (`$1,000 → 0.80% ✅ · $300 → 0.20% ✅`).
 

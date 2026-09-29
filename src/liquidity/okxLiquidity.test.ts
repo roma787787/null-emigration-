@@ -48,6 +48,7 @@ test("auth / rate-limit errors say nothing about the token: unchecked", () => {
 
 // --- against a local stub of the OKX API --------------------------------------------
 let server: Server;
+let rateLimitedOnce = true;
 const seen: Array<{ url: string; headers: Record<string, string | string[] | undefined> }> = [];
 before(async () => {
   server = createServer((req, res) => {
@@ -55,7 +56,12 @@ before(async () => {
     const to = new URL(req.url ?? "/", "http://x").searchParams.get("toTokenAddress");
     const amount = new URL(req.url ?? "/", "http://x").searchParams.get("amount");
     res.setHeader("content-type", "application/json");
-    if (to === "0x00000000000000000000000000000000000000aa") {
+    if (to === "0x00000000000000000000000000000000000000cc" && rateLimitedOnce) {
+      rateLimitedOnce = false;
+      res.end(JSON.stringify({ code: "50011", msg: "Too Many Requests" }));
+    } else if (to === "0x00000000000000000000000000000000000000cc") {
+      res.end(JSON.stringify({ code: "0", data: [{ toTokenAmount: "1", priceImpactPercent: "1" }] }));
+    } else if (to === "0x00000000000000000000000000000000000000aa") {
       res.end(JSON.stringify({ code: "0", data: [{ toTokenAmount: "1000", priceImpactPercent: amount === "1000000000" ? "7" : "2" }] }));
     } else {
       res.end(JSON.stringify({ code: "82000", msg: "Insufficient liquidity" }));
@@ -68,11 +74,12 @@ before(async () => {
     OKX_SECRET_KEY: "secret",
     OKX_API_PASSPHRASE: "pass",
     OKX_API_BASE_URL: `http://127.0.0.1:${port}`,
+    OKX_MIN_INTERVAL_MS: "0",
   });
 });
 after(() => {
   server.close();
-  for (const k of ["OKX_API_KEY", "OKX_SECRET_KEY", "OKX_API_PASSPHRASE", "OKX_API_BASE_URL"]) delete process.env[k];
+  for (const k of ["OKX_API_KEY", "OKX_SECRET_KEY", "OKX_API_PASSPHRASE", "OKX_API_BASE_URL", "OKX_MIN_INTERVAL_MS"]) delete process.env[k];
 });
 
 test("sends a signed $1,000 USDT → token quote on the right chain", async () => {
@@ -125,4 +132,21 @@ test("Strict and Low-Cap can disagree on the same token", async () => {
   const levels = await checkLiquidityLevels("ethereum", "0x00000000000000000000000000000000000000aa");
   assert.equal(levels.LOW_CAP.status, "pass"); // $300: 2% ≤ 10%
   assert.equal(levels.STRICT.status, "skip"); // $1,000: 7% > 5%
+});
+
+test("OKX rate limiting (50011) is waited out and retried, not reported as a verdict", async () => {
+  clearLiquidityCache();
+  const check = await checkLiquidity("ethereum", "0x00000000000000000000000000000000000000cc", "STRICT");
+  assert.equal(check.status, "pass");
+});
+
+test("requests are spaced by OKX_MIN_INTERVAL_MS", async () => {
+  clearLiquidityCache();
+  process.env.OKX_MIN_INTERVAL_MS = "300";
+  const started = Date.now();
+  await checkLiquidity("ethereum", "0x00000000000000000000000000000000000000d1", "STRICT");
+  await checkLiquidity("ethereum", "0x00000000000000000000000000000000000000d2", "STRICT");
+  await checkLiquidity("ethereum", "0x00000000000000000000000000000000000000d3", "STRICT");
+  process.env.OKX_MIN_INTERVAL_MS = "0";
+  assert.ok(Date.now() - started >= 550, `took ${Date.now() - started}ms`);
 });

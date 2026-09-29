@@ -118,7 +118,7 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
         if (!tokenA) {
           const auto = await analyzeAutoCandidate(network, contractAddress, input).catch(() => null);
           if (auto?.kind === "candidate") {
-            const { alternateTokenA: _alt, tokenAGetter: _getter, ...autoFields } = auto.result;
+            const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...autoFields } = auto.result;
             record = {
               ...record,
               ...autoFields,

@@ -8,6 +8,7 @@ import { recheckOutcome } from "../analyzer/recheck.js";
 import { env } from "../config/env.js";
 import type { TrackedContractCreationEvent, UntrackedContractCreationEvent } from "../chain/blockListener.js";
 import { analyzeAutoCandidate, sourceOf } from "../analyzer/autoAnalyzer.js";
+import { dedupKeys, firstSighting } from "./autoDedup.js";
 import { checkLiquidityLevels, isOkxConfigured, type LiquidityCheck } from "../liquidity/okxLiquidity.js";
 import { noteAutoAlert, noteCandidate, noteLiquiditySkip, noteSkipped } from "../chain/autoStats.js";
 import { getPublicClient } from "../chain/provider.js";
@@ -302,8 +303,14 @@ export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration)
         if (outcome.recheck) await scheduleAutoRecheck(data, job.name === "auto-recheck" ? (data.attempt ?? 0) + 1 : 0);
         return;
       }
-      noteCandidate(data.network);
       let result = outcome.result;
+      // The same token pair, or the same code (clones, bot fleets), alerts once per AUTO_DEDUP_HOURS.
+      const keys = dedupKeys(data.network, result.tokenAAddress, result.tokenBAddress ?? result.tokenBSymbolUnverified, result.codeHash);
+      if (!(await firstSighting(keys))) {
+        noteSkipped(data.network, "duplicate");
+        return;
+      }
+      noteCandidate(data.network);
 
       let liquidity: Record<LiquidityLevel, LiquidityCheck> | null = null;
       if (!data.custodianLabel) {
@@ -325,6 +332,15 @@ export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration)
             liquidity = alt;
           }
         }
+        // Only a bare swap(amount) got it here: a migration's Token B is new
+        // and has no market yet; two traded tokens mean a bot or a zap.
+        if (result.swapOnly && result.tokenBAddress) {
+          const target = await checkLiquidityLevels(data.network, result.tokenBAddress);
+          if (target.LOW_CAP.status === "pass") {
+            noteSkipped(data.network, "swap between two traded tokens");
+            return;
+          }
+        }
         const failed = liquidity.LOW_CAP.status === "unchecked" && isOkxConfigured();
         if (failed && job.attemptsMade < 2) throw new Error(`OKX check failed, retrying: ${liquidity.LOW_CAP.reason}`);
         if (liquidity.LOW_CAP.status === "skip") {
@@ -334,7 +350,7 @@ export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration)
         }
       }
 
-      const { alternateTokenA: _alt, tokenAGetter: _getter, ...fields } = result;
+      const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...fields } = result;
       const migrationContract = await migrationContractRepository.create({
         ...fields,
         tokenId: null,

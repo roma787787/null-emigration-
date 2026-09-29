@@ -24,12 +24,15 @@ process.env.LOG_LEVEL ??= "fatal";
 process.env.NODE_ENV = "production";
 process.env.RECHECK_DELAYS_SEC = "3,6,12";
 process.env.AUTO_DISCOVERY = "true";
+process.env.OKX_MIN_INTERVAL_MS = "20";
+process.env.AUTO_DEDUP_HOURS = "0"; // many cases reuse the same tokens / code; dedup gets its own check below
 
 // --- signature DB stub --------------------------------------------------------------
 const KNOWN = [
   "migrate(uint256)", "oldToken()", "newToken()", "rate()", "token0()", "token1()",
   "swap(uint256,uint256,address,bytes)", "getReserves()", "swapTokensForEth(uint256)", "swapBack()",
-  "pairedToken()", "newTokenSymbol()", "isin()", "issuer()", "LEND()", "AAVE()", "migrateFromLEND(uint256)",
+  "pairedToken()", "newTokenSymbol()", "tokenIn()", "tokenOut()", "swapExactIn(uint256)", "swapTokens(uint256,uint256)",
+  "execute(bytes)", "token()", "rewardToken()", "swapAndLiquify(uint256)", "buyTokens()", "exchange(uint256)", "isin()", "issuer()", "LEND()", "AAVE()", "migrateFromLEND(uint256)",
   "LEND_AAVE_RATIO()", "REVISION()", "_totalLendMigrated()", "migrationStarted()", "initialize()",
   "initialize(address,address,bytes)", "upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()",
   "admin()", "changeAdmin(address)", "createPair(address,address)", "setTokens(address,address)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
@@ -122,6 +125,13 @@ await runMigrations();
 await pool.query("TRUNCATE tokens, chat_settings, network_cursors, custodians RESTART IDENTITY CASCADE");
 await q.getContractCreationQueue().obliterate({ force: true });
 await q.getAutoDiscoveryQueue().obliterate({ force: true });
+{
+  const { createRedisConnection } = await import("../src/queue/redisClient.js");
+  const r = createRedisConnection();
+  const stale = await r.keys("auto:seen:*");
+  if (stale.length) await r.del(...stale);
+  r.disconnect();
+}
 clearLiquidityCache();
 
 // Market fixtures: a dollar stable to quote from, a wrapped-native base asset, tokens with and without markets.
@@ -345,6 +355,34 @@ cases.push({
   expect: expectAlert((r) => (r.discovery !== "custodian" || r.custodianLabel !== "Factory Custodian" ? `discovery ${r.discovery} ${r.custodianLabel}` : null)),
 });
 
+// Shapes that flooded the first production run: swap bots, zaps / presales, and
+// "migrators" with no target token. Both of their tokens have real markets here.
+cases.push({
+  label: "swap bot (tokenIn/tokenOut + swap functions, two liquid tokens) → ignored",
+  address: await deployTimed(stranger, "SwapBot", [oldTwin, realLend]),
+  expect: expectNone,
+});
+cases.push({
+  label: "zap / presale (swapAndLiquify, buyTokens, exchange; liquid token) → ignored",
+  address: await deployTimed(stranger, "ZapPresale", [oldTwin, realLend]),
+  expect: expectNone,
+});
+cases.push({
+  label: "swap bot buying a FRESH token (no market) — only the signature gate can stop it → ignored",
+  address: await deployTimed(stranger, "SwapBot", [oldTwin, newToken2]),
+  expect: expectNone,
+});
+cases.push({
+  label: "bare swap(uint256) between two TRADED tokens (bot shape) → ignored",
+  address: await deployTimed(stranger, "MigratorPrivate", [realLend, oldTwin]),
+  expect: expectNone,
+});
+cases.push({
+  label: "migrate() + oldToken() but no target token → not alerted (re-checked later)",
+  address: await deployTimed(stranger, "MigratorNoTarget", [oldTwin]),
+  expect: expectNone,
+});
+
 // --- wait & report ------------------------------------------------------------------------------
 const expected = cases.filter((c) => c.expect(undefined) !== null).map((c) => lower(c.address));
 const deadline = Date.now() + 45_000;
@@ -430,6 +468,18 @@ const spamAlerts = spamAddresses.filter((a) => alerts.has(a)).length;
 check(`the block really holds ${loadBlock.transactions.length} deployments`, loadBlock.transactions.length >= 151, loadBlock.transactions.length);
 check(`the migration among them alerted ${loadLatency.toFixed(1)}s after the block was mined (≤ 10s)`, loadLatency <= 10, loadLatency);
 check(`spam filtered: ${spamAlerts} alerts out of 150 spam contracts (pools, fee tokens, plain tokens, counters)`, spamAlerts === 0, spamAlerts);
+
+// --- dedup: the same migrator redeployed (same pair, same code) alerts once --------------------
+process.env.AUTO_DEDUP_HOURS = "24";
+const dupFirst = lower(await deploy(stranger, "MigratorWithGetters", [oldTwin, newToken2]));
+const dupSecond = lower(await deploy(stranger, "MigratorWithGetters", [oldTwin, newToken2]));
+const dupUntil = Date.now() + 20_000;
+while (!alerts.has(dupFirst) && Date.now() < dupUntil) await new Promise((r) => setTimeout(r, 200));
+await new Promise((r) => setTimeout(r, 4000));
+check("dedup: a redeploy of the same migrator (same tokens, same code) alerts only once", alerts.has(dupFirst) && !alerts.has(dupSecond), {
+  first: alerts.has(dupFirst),
+  second: alerts.has(dupSecond),
+});
 
 await stop();
 console.log(failures === 0 ? "\nALL PASSED" : `\n${failures} FAILURE(S)`);

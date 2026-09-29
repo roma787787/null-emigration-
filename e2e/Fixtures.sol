@@ -299,3 +299,31 @@ contract LateConfiguredMigrator {
     function setTokens(address a, address b) external { require(msg.sender == admin); oldToken = a; newToken = b; }
     function migrate(uint256) external {}
 }
+
+/// Swap bot / aggregator shape: tokenIn/tokenOut and swap functions — not a migration.
+contract SwapBot {
+    address public tokenIn;
+    address public tokenOut;
+    address private owner;
+    constructor(address a, address b) { tokenIn = a; tokenOut = b; owner = msg.sender; }
+    function swapExactIn(uint256) external {}
+    function swapTokens(uint256, uint256) external {}
+    function execute(bytes calldata) external {}
+}
+
+/// Zap / presale shape: buys and swaps a liquid token, references a second one.
+contract ZapPresale {
+    address public token;
+    address public rewardToken;
+    constructor(address a, address b) { token = a; rewardToken = b; }
+    function swapAndLiquify(uint256) external {}
+    function buyTokens() external payable {}
+    function exchange(uint256) external {}
+}
+
+/// migrate() + oldToken() but no target token anywhere.
+contract MigratorNoTarget {
+    address public oldToken;
+    constructor(address a) { oldToken = a; }
+    function migrate(uint256) external {}
+}

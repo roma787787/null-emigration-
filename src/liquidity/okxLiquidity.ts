@@ -118,7 +118,28 @@ export function clearLiquidityCache(): void {
   cache.clear();
 }
 
+// OKX rate-limits DEX API keys (code 50011): requests go out one at a time,
+// OKX_MIN_INTERVAL_MS apart, and a 50011 is waited out and retried.
+let nextSlot = 0;
+async function takeSlot(): Promise<void> {
+  const interval = Number(process.env.OKX_MIN_INTERVAL_MS ?? 1100);
+  const now = Date.now();
+  const at = Math.max(now, nextSlot);
+  nextSlot = at + interval;
+  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+}
+const RATE_LIMIT_RETRIES = 3;
+
 async function requestQuote(config: OkxConfig, params: Record<string, string>): Promise<QuoteResponse> {
+  for (let attempt = 0; ; attempt++) {
+    await takeSlot();
+    const body = await requestQuoteOnce(config, params);
+    if (body.code !== "50011" || attempt >= RATE_LIMIT_RETRIES) return body;
+    await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+  }
+}
+
+async function requestQuoteOnce(config: OkxConfig, params: Record<string, string>): Promise<QuoteResponse> {
   const query = "?" + new URLSearchParams(params).toString();
   const timestamp = new Date().toISOString();
   requestsSent++;
@@ -210,4 +231,26 @@ export async function checkLiquidityLevels(
 export async function okxHealth(network: NetworkKey): Promise<{ ok: boolean; detail: string }> {
   const check = await checkLiquidity(network, "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "STRICT");
   return { ok: check.status === "pass", detail: check.reason };
+}
+
+const HEALTH_TTL_MS = 10 * 60 * 1000;
+const health = new Map<NetworkKey, { at: number; value: { ok: boolean; detail: string } }>();
+const healthInFlight = new Set<NetworkKey>();
+
+/**
+ * Last known OKX health for a network without waiting on OKX: /status must
+ * not fire a burst of quotes (12 networks at once tripped the rate limit).
+ * Returns null while the first check is still running; stale entries are
+ * refreshed in the background, one network at a time through the limiter.
+ */
+export function okxHealthSnapshot(network: NetworkKey): { ok: boolean; detail: string } | null {
+  const cached = health.get(network);
+  if ((!cached || Date.now() - cached.at > HEALTH_TTL_MS) && !healthInFlight.has(network)) {
+    healthInFlight.add(network);
+    okxHealth(network)
+      .catch((err: Error) => ({ ok: false, detail: err.message }))
+      .then((value) => health.set(network, { at: Date.now(), value }))
+      .finally(() => healthInFlight.delete(network));
+  }
+  return cached?.value ?? null;
 }

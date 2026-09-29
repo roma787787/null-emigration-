@@ -14,9 +14,9 @@ export function findRwaSignals(selectors: Hex[]): string[] {
 }
 
 // Getters that point at the token being migrated FROM (spec: oldToken()).
-const OLD_TOKEN_GETTERS = [
-  "oldToken()", "legacyToken()", "previousToken()", "fromToken()", "tokenFrom()", "v1Token()", "sourceToken()", "tokenIn()",
-];
+// Only names that mean "the token being retired" — not tokenIn()/fromToken(),
+// which every swap bot and aggregator has.
+const OLD_TOKEN_GETTERS = ["oldToken()", "legacyToken()", "previousToken()", "v1Token()", "tokenV1()", "oldTokenAddress()"];
 const OLD_TOKEN_SELECTORS = new Set(OLD_TOKEN_GETTERS.map((sig) => toFunctionSelector(sig)));
 
 export function hasOldTokenGetter(selectors: Hex[]): boolean {

@@ -6,7 +6,7 @@ import { getPublicClient } from "../../chain/provider.js";
 import { getListenerStatus, type ListenerStatus } from "../../chain/listenerStatus.js";
 import { blockTraceStatus, traceDetectionStatus } from "../../chain/traceCreateDetector.js";
 import { totalAutoStats, type AutoStats } from "../../chain/autoStats.js";
-import { isOkxConfigured, okxHealth } from "../../liquidity/okxLiquidity.js";
+import { isOkxConfigured, okxHealthSnapshot } from "../../liquidity/okxLiquidity.js";
 import { autoDiscoveryMode, type AutoMode } from "../../config/autoMode.js";
 import { statsRepository } from "../../db/repositories/statsRepository.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
@@ -31,7 +31,7 @@ export interface NetworkReport {
   /** Whole-block tracing for auto-discovery (factory deployments). */
   blockTrace?: "on" | "unavailable" | "untested" | "off";
   /** OKX quote health for this network's quote token; null when not configured. */
-  okx?: { ok: boolean; detail: string } | null;
+  okx?: { ok: boolean; detail: string } | "pending" | null;
 }
 
 export interface StatusReport {
@@ -81,7 +81,8 @@ function networkLine(lang: Language, report: NetworkReport, now: number): string
     const key = { on: "status.traceOn", unavailable: "status.traceUnavailable", untested: "status.traceUntested" }[report.blockTrace];
     parts.push(t(lang, "status.blockTrace", { state: t(lang, key) }));
   }
-  if (report.okx) parts.push(report.okx.ok ? "OKX ✅" : `OKX ❌ (${report.okx.detail.slice(0, 60)})`);
+  if (report.okx === "pending") parts.push("OKX ⏳");
+  else if (report.okx) parts.push(report.okx.ok ? "OKX ✅" : `OKX ❌ (${report.okx.detail.slice(0, 60)})`);
 
   const extra: string[] = [];
   if (listener.skippedBlocks > 0) extra.push(t(lang, "status.skipped", { count: listener.skippedBlocks }));
@@ -156,7 +157,7 @@ export async function collectStatus(): Promise<StatusReport> {
         head: await chainHead(network),
         trace: env.ENABLE_FACTORY_TRACE_DETECTION ? traceDetectionStatus(network) : "off",
         blockTrace: autoMode === "on" && env.ENABLE_FACTORY_TRACE_DETECTION ? blockTraceStatus(network) : "off",
-        okx: okxConfigured ? await okxHealth(network).catch((err) => ({ ok: false, detail: String(err) })) : null,
+        okx: okxConfigured ? (okxHealthSnapshot(network) ?? "pending") : null,
       })),
     ),
   ]);

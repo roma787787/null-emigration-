@@ -1,4 +1,4 @@
-import { getAddress, isAddressEqual, type Address } from "viem";
+import { getAddress, isAddressEqual, keccak256, type Address } from "viem";
 import type { MigrationAnalysisResult, NetworkKey, TokenBSource } from "../types/index.js";
 import { isBaseAsset } from "../config/marketAssets.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
@@ -24,6 +24,14 @@ export interface AutoAnalysisResult extends MigrationAnalysisResult {
   tokenAGetter: string;
   /** Set when names couldn't tell old from new: the other token, which the liquidity check may swap in as Token A. */
   alternateTokenA: Address | null;
+  /** keccak256 of the runtime code (proxy + implementation): identical clones share it. */
+  codeHash: `0x${string}`;
+  /**
+   * Admitted only on a plain `swap(uint256)`-style function: a real
+   * old→new swap migrator — or a bot. The worker tells them apart by Token
+   * B's market: a new token has none yet, a bot trades two liquid tokens.
+   */
+  swapOnly: boolean;
 }
 
 export type AutoAnalysisOutcome =
@@ -34,6 +42,8 @@ export type AutoAnalysisOutcome =
 // On a contract that is itself an ERC-20, only these names mean migration —
 // swap/exchange there are fee-swap plumbing (swapTokensForEth, swapBack).
 const TOKEN_MIGRATION_NAME = /migrat|convert/i;
+const SWAP_NAME = /swap|exchange/i;
+const AMOUNT_ONLY_SWAP = /^(swap|exchange)(tokens?)?\(uint256\)$/i;
 const OLD_NAME = /old|legacy|prev|from|v1|source/i;
 const FROM_X = /from([A-Za-z0-9]+)/i;
 const X_TO_Y = /^([a-z][a-z0-9]*)To([A-Z][A-Za-z0-9]*)$/;
@@ -89,10 +99,24 @@ export async function analyzeAutoCandidate(
     return { kind: "skipped", reason: "proxy without implementation", recheck: true };
   }
 
-  const migrationFunctions = isToken ? strong.filter((s) => TOKEN_MIGRATION_NAME.test(nameOf(s))) : strong;
+  // Spec workflow step 2 (migrate / swap / convert / oldToken()), tightened
+  // for a firehose of every new contract: migrate/convert names or an
+  // oldToken()-style getter carry a contract through; an "xToY" converter
+  // only once x and y turn out to be its own token getters (below); and
+  // swap/exchange never alone — bots, zaps, presales and fee plumbing are
+  // full of them — only alongside one of the above.
+  const nameSignals = strong.filter((s) => TOKEN_MIGRATION_NAME.test(nameOf(s)));
+  const converterNames = isToken ? [] : strong.filter((s) => X_TO_Y.test(nameOf(s)) && !SWAP_NAME.test(nameOf(s)));
+  const swapNames = isToken ? [] : strong.filter((s) => SWAP_NAME.test(nameOf(s)) && !TOKEN_MIGRATION_NAME.test(nameOf(s)));
   const oldGetter = hasOldTokenGetter(selectors);
-  // Spec workflow step 2: no migrate / swap / convert / oldToken() — ignore.
-  if (migrationFunctions.length === 0 && !oldGetter) return { kind: "skipped", reason: "no migration signature" };
+  // `swap(uint256)` / `exchange(uint256)`: hand in N old tokens, get the new
+  // ones — the shape of a "TokenSwap" migrator (bots and zaps take routes,
+  // paths, minimum outputs, not a bare amount).
+  const amountOnlySwaps = swapNames.filter((s) => AMOUNT_ONLY_SWAP.test(s));
+  const swapOnly = nameSignals.length === 0 && !oldGetter && converterNames.length === 0;
+  if (swapOnly && amountOnlySwaps.length === 0) {
+    return { kind: "skipped", reason: swapNames.length > 0 ? "swap functions only" : "no migration signature" };
+  }
 
   // Every ERC-20 the contract points at — from its getters, then its
   // constructor args — minus wrapped-native and stables, which are never the
@@ -115,6 +139,15 @@ export async function analyzeAutoCandidate(
   // A migrator whose tokens are set by a later call (setTokens / initialize).
   if (refs.length === 0) return { kind: "skipped", reason: "no token referenced", recheck: true };
 
+  // An "xToY" converter counts only when x and y are getters of tokens it holds (mkrToSky → mkr(), sky()).
+  const verifiedConverters = converterNames.filter((s) => {
+    const m = X_TO_Y.exec(nameOf(s));
+    return !!m && refs.some((r) => labelIs(r, m[1]!)) && refs.some((r) => labelIs(r, m[2]!));
+  });
+  if (nameSignals.length === 0 && !oldGetter && verifiedConverters.length === 0 && amountOnlySwaps.length === 0) {
+    return { kind: "skipped", reason: "converter names don't match its tokens" };
+  }
+  const migrationFunctions = [...nameSignals, ...verifiedConverters, ...swapNames];
   const functionNames = migrationFunctions.map(nameOf);
   let tokenA: TokenReference | null;
   let tokenB: TokenReference | null;
@@ -137,6 +170,10 @@ export async function analyzeAutoCandidate(
   const symbolOnly = tokenBAddress
     ? null
     : await findSymbolOnlyTokenB(client, contractAddress, signatures).catch(() => null);
+  // A migration moves an old token into a new one: with no Token B at all
+  // (neither an address nor a ticker) it isn't alertable yet — look again
+  // later, in case the target is set after deploy.
+  if (!tokenBAddress && !symbolOnly) return { kind: "skipped", reason: "no Token B", recheck: true };
 
   const matchedAuxiliary = await probeAuxiliarySignals(client, contractAddress).catch((err) => {
     logger.warn({ err, network, contractAddress }, "Auxiliary signal probe failed");
@@ -160,6 +197,8 @@ export async function analyzeAutoCandidate(
       tokenASymbol: await readTokenSymbol(client, tokenA.address),
       tokenAGetter: tokenA.labels[0]!,
       alternateTokenA: !decided && tokenB ? tokenB.address : null,
+      codeHash: keccak256(inspection.bytecode as `0x${string}`),
+      swapOnly: nameSignals.length === 0 && !oldGetter && verifiedConverters.length === 0,
       confidence,
       confidenceScore,
       tokenBAddress,

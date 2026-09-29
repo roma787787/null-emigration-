@@ -45,6 +45,11 @@ export const env = {
   // within the chat's liquidity level; "false" also sends unchecked ones.
   AUTO_REQUIRE_LIQUIDITY: process.env.AUTO_REQUIRE_LIQUIDITY !== "false",
   AUTO_CONCURRENCY: Number(process.env.AUTO_CONCURRENCY ?? 8),
+  // An auto alert for the same token pair, or for a contract with the same
+  // code (clones, bot fleets), isn't repeated within this many hours. 0 = off.
+  get AUTO_DEDUP_HOURS(): number {
+    return Number(process.env.AUTO_DEDUP_HOURS ?? 24);
+  },
 
   /** Networks auto-discovery runs on (it reads and traces every block — the costly part); empty = every enabled network. */
   autoDiscoveryNetworks(): string[] {
