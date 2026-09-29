@@ -10,11 +10,13 @@ import { extractAddressConstants } from "./bytecodeSelectors.js";
 import {
   findRwaSignals,
   findSymbolOnlyTokenB,
+  hasBotCallbacks,
   hasOldTokenGetter,
   isErc4626Vault,
   isLiquidityPool,
   isMigrationAction,
   looksLikeProxy,
+  wrapsBaseAsset,
 } from "./tokenSignals.js";
 import { logger } from "../utils/logger.js";
 
@@ -104,6 +106,7 @@ export async function analyzeAutoCandidate(
   if (!proxyCode || proxyCode === "0x") return { kind: "skipped", reason: "no code" };
   if (isLiquidityPool(selectors)) return { kind: "skipped", reason: "liquidity pool" };
   if (isErc4626Vault(selectors)) return { kind: "skipped", reason: "ERC-4626 vault" };
+  if (hasBotCallbacks(selectors)) return { kind: "skipped", reason: "swap / flash-loan callbacks (bot)" };
   if (!implementation && looksLikeProxy(selectors) && strong.length === 0) {
     return { kind: "skipped", reason: "proxy without implementation", recheck: true };
   }
@@ -144,7 +147,12 @@ export async function analyzeAutoCandidate(
     if (known.some((k) => isAddressEqual(k, address as Address))) continue;
     if (await isErc20(client, getAddress(address))) fromBytecode.push({ address: getAddress(address), labels: ["bytecode"] });
   }
-  const refs = [...fromGetters, ...fromConstructor, ...fromBytecode].filter((r) => !isBaseAsset(network, r.address));
+  // …and wrappers of those (Aave aWETH, Compound cUSDC, vault shares).
+  const refs: TokenReference[] = [];
+  for (const r of [...fromGetters, ...fromConstructor, ...fromBytecode]) {
+    if (isBaseAsset(network, r.address) || (await wrapsBaseAsset(client, network, r.address))) continue;
+    refs.push(r);
+  }
   // A migrator whose tokens are set by a later call (setTokens / initialize).
   if (refs.length === 0) return { kind: "skipped", reason: "no token referenced", recheck: true };
 

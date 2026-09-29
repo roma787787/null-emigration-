@@ -400,3 +400,19 @@ contract Forwarder {
         require(ok, "forward failed");
     }
 }
+
+/// Aave aToken shape: a deposit receipt over a base asset (aOptWETH / aBasWETH).
+contract ATokenLike is SimpleToken {
+    address public UNDERLYING_ASSET_ADDRESS;
+    constructor(address u) SimpleToken("Aave Optimism WETH", "aOptWETH", 1e24) { UNDERLYING_ASSET_ADDRESS = u; }
+}
+
+/// The Optimism/Base 0x067f… shape: migrate(address) plus a Uniswap V3 swap
+/// callback, tokens compiled in — a trading / position bot.
+contract CallbackBotMigrate {
+    address immutable a;
+    address immutable b;
+    constructor(address x, address y) { a = x; b = y; }
+    function migrate(address to) external { SimpleToken(a).transfer(to, 1); SimpleToken(b).transfer(to, 1); }
+    function uniswapV3SwapCallback(int256, int256, bytes calldata) external {}
+}

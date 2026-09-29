@@ -21,3 +21,13 @@ test("ERC-4626 vaults are recognised by asset/totalAssets + convertTo*", () => {
   assert.equal(isErc4626Vault(sel("asset()", "convertToShares(uint256)")), false);
   assert.equal(isErc4626Vault(sel("migrate(uint256)", "oldToken()")), false);
 });
+
+test("swap / flash-loan callbacks mark a bot, not a migrator", async () => {
+  const { hasBotCallbacks } = await import("./tokenSignals.js");
+  const { toFunctionSelector } = await import("viem");
+  const sel = (s: string) => toFunctionSelector(s);
+  assert.equal(hasBotCallbacks([sel("migrate(address)"), sel("uniswapV3SwapCallback(int256,int256,bytes)")]), true);
+  assert.equal(hasBotCallbacks([sel("executeOperation(address,uint256,uint256,address,bytes)")]), true);
+  assert.equal(hasBotCallbacks([sel("receiveFlashLoan(address[],uint256[],uint256[],bytes)")]), true);
+  assert.equal(hasBotCallbacks([sel("migrate(uint256)"), sel("oldToken()"), sel("newToken()")]), false);
+});

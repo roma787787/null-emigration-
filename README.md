@@ -191,6 +191,8 @@ find migrations. For every block on every enabled network:
    A candidate also needs a Token B (address, or ticker → Unverified); one
    without is re-checked later. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
    ERC-4626 vaults (`asset()` + `totalAssets()` + `convertTo*` — even with a `migrate()`),
+   trading / flash-loan bots (`uniswapV3SwapCallback`, `uniswapV2Call`,
+   `executeOperation`, `receiveFlashLoan`, `onFlashLoan`…),
    ERC-20s whose only "swap" is fee plumbing (`swapTokensForEth`), contracts
    that reference no other token.
 3. **Token A / Token B by address only** — every ERC-20 the contract returns
@@ -199,7 +201,9 @@ find migrations. For every block on every enabled network:
    decided from names (`oldToken`/`newToken`, `migrateFromLEND` → `LEND()`,
    `mkrToSky` → `mkr()`/`sky()`); a token with `migrate()` is itself Token B;
    when names don't tell, the token with a market is Token A. Wrapped native
-   and stablecoins are never Token A. Symbols are only displayed — never
+   and stablecoins are never Token A, nor are wrappers of them (Aave's
+   aWETH, Compound's cUSDC, vault shares — via `UNDERLYING_ASSET_ADDRESS()`,
+   `underlying()`, `asset()`). Symbols are only displayed — never
    matched — so same-ticker tokens on other chains can't be confused. A
    target given only as a ticker (e.g. `newTokenSymbol()`) is shown as
    **Unverified** and the alert is LOW. A migrator deployed empty (tokens

@@ -40,6 +40,7 @@ const KNOWN = [
   "initialize(address,address,bytes)", "upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()",
   "admin()", "changeAdmin(address)", "createPair(address,address)", "setTokens(address,address)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
   "name()", "symbol()", "decimals()", "deploy(address,address,bytes32)",
+  "migrate(address)", "uniswapV3SwapCallback(int256,int256,bytes)", "UNDERLYING_ASSET_ADDRESS()",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -386,6 +387,20 @@ cases.push({
 cases.push({ label: "ERC-4626 vault over a liquid asset (gtWETH / USDG vault shape) → ignored", address: await deployTimed(stranger, "Erc4626LikeVault", [realLend]), expect: expectNone });
 cases.push({ label: "ERC-4626 vault that also has migrate(uint256) (MATIC vault shape) → ignored", address: await deployTimed(stranger, "VaultWithMigrate", [realLend]), expect: expectNone });
 cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });
+// Production false positives on Optimism / Base: a bot with migrate(address) +
+// uniswapV3SwapCallback, and Aave's aWETH as "Token A".
+cases.push({
+  label: "bot with migrate(address) + uniswapV3SwapCallback, tokens in its code (Optimism/Base 0x067f… shape) → ignored",
+  address: await deployTimed(stranger, "CallbackBotMigrate", [oldTwin, newToken2]),
+  expect: expectNone,
+});
+const aWeth = await deploy(owner, "ATokenLike", [weth]);
+markets.set(lower(aWeth), { low: 0.05, strict: 0.05, deep: 0.06 });
+cases.push({
+  label: "'migration' out of Aave aWETH (a wrapper of a base asset) → ignored",
+  address: await deployTimed(stranger, "MigratorWithGetters", [aWeth, newToken2]),
+  expect: expectNone,
+});
 cases.push({
   label: "migrate() + oldToken() but no target token → not alerted (re-checked later)",
   address: await deployTimed(stranger, "MigratorNoTarget", [oldTwin]),
