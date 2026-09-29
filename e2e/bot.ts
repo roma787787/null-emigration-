@@ -303,7 +303,7 @@ const carol = await chatSettingsRepository.get(String(CAROL));
 check("toggling a network off excludes it for that chat", Boolean(carol?.networksFilter && !carol.networksFilter.includes(NETWORK)), carol?.networksFilter);
 
 const settingsButtons = buttons(await send(ALICE, "/settings"));
-check("/settings has auto-discovery and liquidity-level buttons", ["settings:auto:on", "settings:auto:off", "settings:liq:STRICT", "settings:liq:LOW_CAP"].every((x) => settingsButtons.includes(x)), settingsButtons);
+check("/settings has auto-discovery and liquidity-level buttons", ["settings:auto:on", "settings:auto:off", "settings:liq:STRICT", "settings:liq:LOW_CAP", "settings:liq:DEEP"].every((x) => settingsButtons.includes(x)), settingsButtons);
 await click(ALICE, "settings:liq:LOW_CAP");
 await click(ALICE, "settings:auto:off");
 let alice = await chatSettingsRepository.get(String(ALICE));

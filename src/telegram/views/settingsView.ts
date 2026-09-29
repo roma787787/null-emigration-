@@ -1,10 +1,23 @@
 import { Markup } from "telegraf";
 import { allNetworkKeys } from "../../config/networks.js";
 import { chatSettingsRepository } from "../../db/repositories/chatSettingsRepository.js";
-import type { ChatSettingsRecord, Language, NetworkKey } from "../../types/index.js";
+import type { ChatSettingsRecord, Language, LiquidityLevel, NetworkKey } from "../../types/index.js";
+import { LEVEL_ORDER, liquidityLevel } from "../../liquidity/okxLiquidity.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 
 const NETWORK_BUTTONS_PER_ROW = 3;
+
+const LEVEL_NAME_KEYS: Record<LiquidityLevel, string> = {
+  LOW_CAP: "settings.levelLowCap",
+  STRICT: "settings.levelStrict",
+  DEEP: "settings.levelDeep",
+};
+
+/** "Deep — $10,000 / ≤3%", with the thresholds actually in force. */
+export function levelLabel(lang: Language, level: LiquidityLevel): string {
+  const { amountUsd, maxImpactPercent } = liquidityLevel(level);
+  return `${t(lang, LEVEL_NAME_KEYS[level])} ($${amountUsd.toLocaleString("en-US")} / ≤${maxImpactPercent}%)`;
+}
 
 function checkmark(active: boolean): string {
   return active ? " ✅" : "";
@@ -20,7 +33,7 @@ export function buildSettingsText(settings: ChatSettingsRecord, lang: Language):
     }),
     t(lang, "settings.autoLabel", { state: t(lang, settings.autoAlerts ? "settings.on" : "settings.off") }),
     t(lang, "settings.liquidityLabel", {
-      level: t(lang, settings.liquidityLevel === "LOW_CAP" ? "settings.levelLowCap" : "settings.levelStrict"),
+      level: levelLabel(lang, settings.liquidityLevel),
     }),
   ].join("\n");
 }
@@ -71,18 +84,11 @@ export function buildSettingsKeyboard(
       "settings:auto:off",
     ),
   ];
-  const liquidityRow = [
-    Markup.button.callback(
-      `${t(lang, "settings.levelStrict")}${checkmark(settings.liquidityLevel === "STRICT")}`,
-      "settings:liq:STRICT",
-    ),
-    Markup.button.callback(
-      `${t(lang, "settings.levelLowCap")}${checkmark(settings.liquidityLevel === "LOW_CAP")}`,
-      "settings:liq:LOW_CAP",
-    ),
-  ];
+  const liquidityRows = LEVEL_ORDER.map((level) => [
+    Markup.button.callback(`${levelLabel(lang, level)}${checkmark(settings.liquidityLevel === level)}`, `settings:liq:${level}`),
+  ]);
 
-  return Markup.inlineKeyboard([confidenceRow, autoRow, liquidityRow, ...networkRows, allNetworksRow]);
+  return Markup.inlineKeyboard([confidenceRow, autoRow, ...liquidityRows, ...networkRows, allNetworksRow]);
 }
 
 function isNetworkActive(filter: NetworkKey[] | null, network: NetworkKey): boolean {

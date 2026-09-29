@@ -194,8 +194,10 @@ find migrations. For every block on every enabled network:
 4. **Liquidity test (OKX DEX aggregator, `GET /api/v6/dex/aggregator/quote`)**
    — a quote for $300 then $1,000 of the network's dollar stablecoin into
    Token A. PASS = `code == 0`, a route, and price impact within the chat's
-   level: **Strict** ($1,000 / ≤ 5%, default) or **Low-Cap** ($300 / ≤ 10%),
-   chosen per chat in `/settings`. No route / too much impact / honeypot =
+   level: **Strict** ($1,000 / ≤ 5%, default), **Low-Cap** ($300 / ≤ 10%) or
+   **Deep** ($10,000 / ≤ 3% — only tokens with a pool of roughly $300k+),
+   chosen per chat in `/settings`; each is tunable with
+   `LIQUIDITY_<LEVEL>=<usd>:<max impact %>` (e.g. `LIQUIDITY_DEEP=25000:2`). No route / too much impact / honeypot =
    dropped. Results are cached per token for 5 minutes; an OKX outage is
    retried rather than cached.
 5. **Dedup** — the same token pair, or the same contract code (clones, bot

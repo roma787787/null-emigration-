@@ -59,15 +59,17 @@ function formatImpact(check: StoredLiquidityCheck): string {
   return `$${check.amountUsd.toLocaleString("en-US")} → ${impact} ${mark}`;
 }
 
-/** "💧 Liquidity (OKX): $1,000 → 0.80% ✅ · $300 → 0.20% ✅" — the executable-route test on Token A. */
+/** "💧 Liquidity (OKX): $10,000 → 2.10% ✅ · $1,000 → 0.80% ✅ · $300 → 0.20% ✅" — the executable-route tests on Token A. */
 function liquidityLine(lang: Language, migration: MigrationContractRecord): string | null {
   const checks = migration.liquidity;
   if (!checks) return null;
+  // Largest swap first; detections stored before a level existed just lack it.
+  const present = (["DEEP", "STRICT", "LOW_CAP"] as const).flatMap((level) => (checks[level] ? [checks[level]] : []));
   const label = escapeMd(t(lang, "card.liquidity"));
-  if (checks.STRICT.status === "unchecked" && checks.LOW_CAP.status === "unchecked") {
-    return `💧 ${label}: _${escapeMd(t(lang, "card.liquidityUnchecked", { reason: checks.LOW_CAP.reason }))}_`;
+  if (present.every((c) => c.status === "unchecked")) {
+    return `💧 ${label}: _${escapeMd(t(lang, "card.liquidityUnchecked", { reason: present[0]?.reason ?? "" }))}_`;
   }
-  return `💧 ${label}: ${escapeMd(`${formatImpact(checks.STRICT)} · ${formatImpact(checks.LOW_CAP)}`)}`;
+  return `💧 ${label}: ${escapeMd(present.map(formatImpact).join(" · "))}`;
 }
 
 interface FormatOptions {

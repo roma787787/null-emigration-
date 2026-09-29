@@ -50,7 +50,8 @@ await new Promise<void>((r) => sigDb.listen(8547, "127.0.0.1", r));
 process.env.SIGNATURE_DB_URL = "http://127.0.0.1:8547/signature-database/v1/lookup";
 
 // --- OKX DEX API stub: per Token A, the price impact for $300 and $1,000 ------------
-type Market = { low: number; strict: number } | "noroute" | { failFirst: number; then: { low: number; strict: number } };
+type Impacts = { low: number; strict: number; deep?: number };
+type Market = Impacts | "noroute" | { failFirst: number; then: Impacts };
 const markets = new Map<string, Market>();
 const okxRequests = new Map<string, number>();
 let okxSignedOk = true;
@@ -70,7 +71,8 @@ const okx = createServer((req, res) => {
     market = market.then;
   }
   if (!market || market === "noroute") return void res.end(JSON.stringify({ code: "82000", msg: "Insufficient liquidity" }));
-  const impact = amount >= 1000n * 10n ** 18n ? market.strict : market.low;
+  // $300 → low, $1,000 → strict, $10,000 → deep (default: 3× the $1,000 impact).
+  const impact = amount >= 10000n * 10n ** 18n ? (market.deep ?? market.strict * 3) : amount >= 1000n * 10n ** 18n ? market.strict : market.low;
   res.end(JSON.stringify({ code: "0", msg: "", data: [{ toTokenAmount: "1000", priceImpactPercent: String(-impact) }] }));
 });
 await new Promise<void>((r) => okx.listen(8549, "127.0.0.1", r));
@@ -187,9 +189,9 @@ async function deployTimed(from: typeof owner, name: string, args: unknown[] = [
 }
 
 // Chats with different settings, to check routing.
-const chat = (liquidityLevel: "STRICT" | "LOW_CAP", autoAlerts = true) =>
-  ({ chatId: "c", liquidityLevel, autoAlerts, confidenceFilter: "ALL", networksFilter: null, language: "en", approved: true, accessRequested: true, createdAt: new Date() }) as const;
-const strictChat = chat("STRICT"), lowCapChat = chat("LOW_CAP"), trackedOnlyChat = chat("STRICT", false);
+const chat = (liquidityLevel: "STRICT" | "LOW_CAP" | "DEEP", autoAlerts = true) =>
+  ({ chatId: "c", liquidityLevel: liquidityLevel as "STRICT" | "LOW_CAP" | "DEEP", autoAlerts, confidenceFilter: "ALL", networksFilter: null, language: "en", approved: true, accessRequested: true, createdAt: new Date() }) as const;
+const strictChat = chat("STRICT"), lowCapChat = chat("LOW_CAP"), deepChat = chat("DEEP"), trackedOnlyChat = chat("STRICT", false);
 
 // --- scenarios ------------------------------------------------------------------------------
 const cases: Array<{ label: string; address: Address; expect: (r: NonNullable<Record_> | undefined) => string | null }> = [];
@@ -403,12 +405,18 @@ const thinRec = alerts.get(lower(cases[12]!.address))?.record;
 const firstRec = alerts.get(lower(cases[0]!.address))?.record;
 const rwaRec = alerts.get(lower(cases[14]!.address))?.record;
 check("thin market: a Low-Cap chat gets it, a Strict chat doesn't", !!thinRec && wantsAutoAlert(lowCapChat, thinRec) && !wantsAutoAlert(strictChat, thinRec));
+const aaveRec = alerts.get(lower(lendImpl))?.record;
+check(
+  "Deep ($10,000 / ≤3%): a deep market passes (LEND 1.2%), a mid one doesn't (OLD-twin 3.3%) — Strict takes both",
+  !!aaveRec && !!firstRec && wantsAutoAlert(deepChat, aaveRec) && !wantsAutoAlert(deepChat, firstRec) && wantsAutoAlert(strictChat, firstRec),
+  { aave: aaveRec?.liquidity?.DEEP, twin: firstRec?.liquidity?.DEEP },
+);
 check("a chat with auto alerts off gets no auto alert", !!firstRec && !wantsAutoAlert(trackedOnlyChat, firstRec) && wantsAutoAlert(strictChat, firstRec));
 check("custodian RWA alert reaches Strict chats without a DEX market", !!rwaRec && wantsAutoAlert(strictChat, rwaRec));
 const trackedRec = alerts.get(lower(cases[2]!.address))?.record;
 check("tracked-project alerts ignore the auto toggle and liquidity level", !!trackedRec && wantsAutoAlert(trackedOnlyChat, trackedRec));
 const twinRequests = okxRequests.get(lower(oldTwin)) ?? 0;
-check(`OKX results cached per token: OLD-twin used by 6 contracts, ${twinRequests} quote request(s) (≤ 2: $300 + $1,000)`, twinRequests <= 2 && twinRequests > 0, twinRequests);
+check(`OKX results cached per token: OLD-twin used by 6 contracts, ${twinRequests} quote request(s) (≤ 3: $300 + $1,000 + $10,000)`, twinRequests <= 3 && twinRequests > 0, twinRequests);
 check("every OKX request carried the signed OK-ACCESS-* headers", okxSignedOk);
 const viaRecheck = new Set([lower(lendProxy), lower(late)]); // found on re-check by design, seconds later
 const latencies = cases.filter((c) => !viaRecheck.has(lower(c.address))).flatMap((c) => {

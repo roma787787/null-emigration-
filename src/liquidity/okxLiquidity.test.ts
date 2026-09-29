@@ -105,12 +105,13 @@ test("results are cached per token for 5 minutes", async () => {
   assert.equal(okxRequestsSent() - before, 1);
 });
 
-test("both levels: a token failing even Low-Cap costs one request, not two", async () => {
+test("all levels: a token failing even Low-Cap costs one request, not three", async () => {
   clearLiquidityCache();
   const before = okxRequestsSent();
   const levels = await checkLiquidityLevels("ethereum", "0x00000000000000000000000000000000000000bb");
   assert.equal(levels.LOW_CAP.status, "skip");
   assert.equal(levels.STRICT.status, "skip");
+  assert.equal(levels.DEEP.status, "skip");
   assert.equal(okxRequestsSent() - before, 1);
 });
 
@@ -132,6 +133,19 @@ test("Strict and Low-Cap can disagree on the same token", async () => {
   const levels = await checkLiquidityLevels("ethereum", "0x00000000000000000000000000000000000000aa");
   assert.equal(levels.LOW_CAP.status, "pass"); // $300: 2% ≤ 10%
   assert.equal(levels.STRICT.status, "skip"); // $1,000: 7% > 5%
+  assert.equal(levels.DEEP.status, "skip"); // failed at $1,000 → not even asked at $10,000
+});
+
+test("Deep defaults to $10,000 / 3% and every level is overridable via LIQUIDITY_<LEVEL>", async () => {
+  const { liquidityLevel } = await import("./okxLiquidity.js");
+  assert.deepEqual(liquidityLevel("DEEP"), { amountUsd: 10000, maxImpactPercent: 3 });
+  process.env.LIQUIDITY_DEEP = "25000:2";
+  assert.deepEqual(liquidityLevel("DEEP"), { amountUsd: 25000, maxImpactPercent: 2 });
+  process.env.LIQUIDITY_DEEP = "garbage";
+  assert.deepEqual(liquidityLevel("DEEP"), { amountUsd: 10000, maxImpactPercent: 3 });
+  delete process.env.LIQUIDITY_DEEP;
+  assert.equal(verdictFromQuote({ code: "0", data: [{ toTokenAmount: "1", priceImpactPercent: "3.5" }] }, "DEEP").status, "skip");
+  assert.equal(verdictFromQuote({ code: "0", data: [{ toTokenAmount: "1", priceImpactPercent: "2.9" }] }, "DEEP").status, "pass");
 });
 
 test("OKX rate limiting (50011) is waited out and retried, not reported as a verdict", async () => {

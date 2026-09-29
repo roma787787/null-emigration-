@@ -34,7 +34,7 @@ export interface TokenOwnerRecord {
 /** How a detection was found: a tracked project's wallet, a scan of all new contracts, or a registered RWA custodian. */
 export type DiscoveryKind = "tracked" | "auto" | "custodian";
 
-export type LiquidityLevel = "STRICT" | "LOW_CAP";
+export type LiquidityLevel = "LOW_CAP" | "STRICT" | "DEEP";
 
 export interface StoredLiquidityCheck {
   status: "pass" | "skip" | "unchecked";

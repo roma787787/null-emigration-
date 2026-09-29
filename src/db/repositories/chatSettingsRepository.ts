@@ -16,7 +16,7 @@ interface ChatSettingsRow {
 function toRecord(row: ChatSettingsRow): ChatSettingsRecord {
   return {
     chatId: row.chat_id,
-    liquidityLevel: row.liquidity_level === "LOW_CAP" ? "LOW_CAP" : "STRICT",
+    liquidityLevel: row.liquidity_level === "LOW_CAP" || row.liquidity_level === "DEEP" ? row.liquidity_level : "STRICT",
     autoAlerts: row.auto_alerts,
     confidenceFilter: row.confidence_filter as ConfidenceFilter,
     networksFilter: (row.networks_filter as NetworkKey[] | null) ?? null,

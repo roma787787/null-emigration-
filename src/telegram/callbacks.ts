@@ -19,9 +19,9 @@ export function registerCallbacks(bot: Telegraf): void {
     await ctx.answerCbQuery(t(settings.language ?? DEFAULT_LANGUAGE, "settings.cbConfidenceSet", { filter }));
   });
 
-  bot.action(/^settings:liq:(STRICT|LOW_CAP)$/, async (ctx) => {
+  bot.action(/^settings:liq:(STRICT|LOW_CAP|DEEP)$/, async (ctx) => {
     const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
-    await chatSettingsRepository.setLiquidityLevel(chatId, ctx.match[1] as "STRICT" | "LOW_CAP");
+    await chatSettingsRepository.setLiquidityLevel(chatId, ctx.match[1] as "STRICT" | "LOW_CAP" | "DEEP");
     const { text, keyboard } = await renderSettings(chatId);
     await ctx.editMessageText(text, keyboard).catch(() => undefined);
     await ctx.answerCbQuery();

@@ -12,10 +12,22 @@ import { logger } from "../utils/logger.js";
  */
 
 export type { LiquidityLevel };
-export const LIQUIDITY_LEVELS: Record<LiquidityLevel, { amountUsd: number; maxImpactPercent: number }> = {
-  STRICT: { amountUsd: 1000, maxImpactPercent: 5 },
+// Test swap size and price-impact cap per level. Spec: Strict $1,000 / 5%
+// (default), Low-Cap $300 / 10%; Deep $10,000 / 3% keeps only tokens with a
+// pool of roughly $300k+. Override with LIQUIDITY_<LEVEL>="<usd>:<max impact %>".
+const DEFAULT_LEVELS: Record<LiquidityLevel, { amountUsd: number; maxImpactPercent: number }> = {
   LOW_CAP: { amountUsd: 300, maxImpactPercent: 10 },
+  STRICT: { amountUsd: 1000, maxImpactPercent: 5 },
+  DEEP: { amountUsd: 10000, maxImpactPercent: 3 },
 };
+
+/** Least to most demanding. */
+export const LEVEL_ORDER: LiquidityLevel[] = ["LOW_CAP", "STRICT", "DEEP"];
+
+export function liquidityLevel(level: LiquidityLevel): { amountUsd: number; maxImpactPercent: number } {
+  const [usd, impact] = (process.env[`LIQUIDITY_${level}`] ?? "").split(":").map(Number);
+  return usd && usd > 0 && impact && impact > 0 ? { amountUsd: usd, maxImpactPercent: impact } : DEFAULT_LEVELS[level];
+}
 
 /** pass = executable route within the impact cap · skip = no route / too thin / honeypot · unchecked = couldn't ask (not configured, API down, unsupported chain). */
 export type LiquidityStatus = "pass" | "skip" | "unchecked";
@@ -88,7 +100,7 @@ export function verdictFromQuote(
   body: QuoteResponse,
   level: LiquidityLevel,
 ): Pick<LiquidityCheck, "status" | "impactPercent" | "reason"> {
-  const { maxImpactPercent } = LIQUIDITY_LEVELS[level];
+  const { maxImpactPercent } = liquidityLevel(level);
   if (body.code !== "0") {
     const code = String(body.code ?? "?");
     const routing = code.startsWith("82") || /liquidity|route|not support|no quote/i.test(body.msg ?? "");
@@ -166,7 +178,7 @@ async function requestQuoteOnce(config: OkxConfig, params: Record<string, string
  * per (network, token, level) for 5 minutes.
  */
 export async function checkLiquidity(network: NetworkKey, token: string, level: LiquidityLevel): Promise<LiquidityCheck> {
-  const { amountUsd, maxImpactPercent } = LIQUIDITY_LEVELS[level];
+  const { amountUsd, maxImpactPercent } = liquidityLevel(level);
   const base = { level, amountUsd, maxImpactPercent };
   const key = `${network}:${token.toLowerCase()}:${level}`;
   const cached = cache.get(key);
@@ -208,19 +220,24 @@ export async function checkLiquidity(network: NetworkKey, token: string, level: 
 }
 
 /**
- * Both levels for a token. LOW_CAP ($300 / 10%) is asked first: if even that
- * fails, the $1,000 / 5% test can't pass either, so it isn't sent.
+ * Every level for a token, least demanding first. Once a test fails, a
+ * bigger swap with a tighter cap can't pass either, so it isn't sent.
  */
 export async function checkLiquidityLevels(
   network: NetworkKey,
   token: string,
 ): Promise<Record<LiquidityLevel, LiquidityCheck>> {
-  const lowCap = await checkLiquidity(network, token, "LOW_CAP");
-  const strict =
-    lowCap.status === "skip"
-      ? { ...lowCap, level: "STRICT" as const, ...LIQUIDITY_LEVELS.STRICT, reason: `${lowCap.reason} (at $300)` }
-      : await checkLiquidity(network, token, "STRICT");
-  return { STRICT: strict, LOW_CAP: lowCap };
+  const out = {} as Record<LiquidityLevel, LiquidityCheck>;
+  let failed: LiquidityCheck | null = null;
+  for (const level of LEVEL_ORDER) {
+    const params = liquidityLevel(level);
+    const harder = failed && params.amountUsd >= failed.amountUsd && params.maxImpactPercent <= failed.maxImpactPercent;
+    out[level] = harder
+      ? { ...failed!, level, ...params, reason: `${failed!.reason} (at $${failed!.amountUsd.toLocaleString("en-US")})` }
+      : await checkLiquidity(network, token, level);
+    if (out[level].status === "skip" && !harder) failed = out[level];
+  }
+  return out;
 }
 
 /**
