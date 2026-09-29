@@ -7,7 +7,15 @@ import { collectTokenGetters, isErc20, targetRank, type TokenReference } from ".
 import { extractAddressCandidatesFromConstructorArgs } from "./constructorArgsDecoder.js";
 import { probeAuxiliarySignals } from "./staticCallProbe.js";
 import { extractAddressConstants } from "./bytecodeSelectors.js";
-import { findRwaSignals, findSymbolOnlyTokenB, hasOldTokenGetter, isLiquidityPool, looksLikeProxy } from "./tokenSignals.js";
+import {
+  findRwaSignals,
+  findSymbolOnlyTokenB,
+  hasOldTokenGetter,
+  isErc4626Vault,
+  isLiquidityPool,
+  isMigrationAction,
+  looksLikeProxy,
+} from "./tokenSignals.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -95,6 +103,7 @@ export async function analyzeAutoCandidate(
   const { client, proxyCode, selectors, signatures, isToken, strong, matchedEvents, implementation } = inspection;
   if (!proxyCode || proxyCode === "0x") return { kind: "skipped", reason: "no code" };
   if (isLiquidityPool(selectors)) return { kind: "skipped", reason: "liquidity pool" };
+  if (isErc4626Vault(selectors)) return { kind: "skipped", reason: "ERC-4626 vault" };
   if (!implementation && looksLikeProxy(selectors) && strong.length === 0) {
     return { kind: "skipped", reason: "proxy without implementation", recheck: true };
   }
@@ -105,7 +114,7 @@ export async function analyzeAutoCandidate(
   // only once x and y turn out to be its own token getters (below); and
   // swap/exchange never alone — bots, zaps, presales and fee plumbing are
   // full of them — only alongside one of the above.
-  const nameSignals = strong.filter((s) => TOKEN_MIGRATION_NAME.test(nameOf(s)));
+  const nameSignals = strong.filter((s) => isMigrationAction(nameOf(s)));
   const converterNames = isToken ? [] : strong.filter((s) => X_TO_Y.test(nameOf(s)) && !SWAP_NAME.test(nameOf(s)));
   const swapNames = isToken ? [] : strong.filter((s) => SWAP_NAME.test(nameOf(s)) && !TOKEN_MIGRATION_NAME.test(nameOf(s)));
   const oldGetter = hasOldTokenGetter(selectors);

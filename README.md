@@ -173,7 +173,9 @@ find migrations. For every block on every enabled network:
    `AUTO_BLOCK_TRACE_NETWORKS=ethereum` enables `block` for chosen networks
    only; `off` = direct deployments only.
 2. **Signature gate** — kept only if the dispatcher has a `migrate*` /
-   `convert*` function, an `oldToken()`-style getter (`oldToken`,
+   `convert*` action (not settings/flags that merely mention it —
+   `setMigratedPool`, `migratedPools`, `isConverted` — nor ERC-4626's
+   `convertToShares`/`convertToAssets`), an `oldToken()`-style getter (`oldToken`,
    `legacyToken`, `previousToken`, `v1Token`…; not `tokenIn`/`fromToken`,
    which every swap bot has), or an `xToY` converter whose x and y are its own
    token getters. `swap*`/`exchange*` alone never qualify — bots, zaps and
@@ -182,6 +184,7 @@ find migrations. For every block on every enabled network:
    Token B has no DEX market yet (a new token; a bot trades two liquid ones).
    A candidate also needs a Token B (address, or ticker → Unverified); one
    without is re-checked later. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
+   ERC-4626 vaults (`asset()` + `totalAssets()` + `convertTo*` — even with a `migrate()`),
    ERC-20s whose only "swap" is fee plumbing (`swapTokensForEth`), contracts
    that reference no other token.
 3. **Token A / Token B by address only** — every ERC-20 the contract returns

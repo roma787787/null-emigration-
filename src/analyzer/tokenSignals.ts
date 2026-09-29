@@ -31,6 +31,27 @@ export function isLiquidityPool(selectors: Hex[]): boolean {
   return POOL_SELECTORS.every((s) => selectors.includes(s));
 }
 
+// ERC-4626 vaults: a share token over an underlying asset(), with the
+// standard convertToShares/convertToAssets — deposits, not migrations.
+const VAULT_SELECTORS = ["asset()", "totalAssets()"].map((sig) => toFunctionSelector(sig));
+const VAULT_CONVERT = ["convertToShares(uint256)", "convertToAssets(uint256)"].map((sig) => toFunctionSelector(sig));
+
+export function isErc4626Vault(selectors: Hex[]): boolean {
+  return VAULT_SELECTORS.every((s) => selectors.includes(s)) && VAULT_CONVERT.some((s) => selectors.includes(s));
+}
+
+/**
+ * A function that performs a migration — `migrate`, `migrateFromLEND`,
+ * `convertTokens` — as opposed to settings, flags and views that merely
+ * mention it (`setMigratedPool`, `migratedPools`, `migrationEnded`,
+ * `isConverted`) or ERC-4626's `convertToShares`/`convertToAssets`.
+ */
+export function isMigrationAction(name: string): boolean {
+  if (!/^(migrate|convert)/i.test(name)) return false;
+  if (/^(migrated|converted)/i.test(name)) return false;
+  return !/^convertTo(Shares|Assets)$/i.test(name);
+}
+
 // Upgradeable-proxy entry points: a proxy that has them but no implementation
 // yet is only half deployed; what it will become is decided by a later call.
 const PROXY_SELECTORS = ["upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()"].map((sig) =>

@@ -33,7 +33,9 @@ const KNOWN = [
   "migrate(uint256)", "oldToken()", "newToken()", "rate()", "token0()", "token1()",
   "swap(uint256,uint256,address,bytes)", "getReserves()", "swapTokensForEth(uint256)", "swapBack()",
   "pairedToken()", "newTokenSymbol()", "tokenIn()", "tokenOut()", "swapExactIn(uint256)", "swapTokens(uint256,uint256)",
-  "execute(bytes)", "token()", "rewardToken()", "swapAndLiquify(uint256)", "buyTokens()", "exchange(uint256)", "isin()", "issuer()", "LEND()", "AAVE()", "migrateFromLEND(uint256)",
+  "execute(bytes)", "token()", "rewardToken()", "asset()", "totalAssets()", "convertToShares(uint256)",
+  "convertToAssets(uint256)", "deposit(uint256,address)", "quoteToken()", "migratedPools(address)",
+  "setMigratedPool(address,bool)", "setMigratedPools(address[],bool)", "swapAndLiquify(uint256)", "buyTokens()", "exchange(uint256)", "isin()", "issuer()", "LEND()", "AAVE()", "migrateFromLEND(uint256)",
   "LEND_AAVE_RATIO()", "REVISION()", "_totalLendMigrated()", "migrationStarted()", "initialize()",
   "initialize(address,address,bytes)", "upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()",
   "admin()", "changeAdmin(address)", "createPair(address,address)", "setTokens(address,address)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
@@ -380,6 +382,10 @@ cases.push({
   address: await deployTimed(stranger, "MigratorPrivate", [realLend, oldTwin]),
   expect: expectNone,
 });
+// The first real false positives from production (ERC-4626 vaults, a four.meme-style token).
+cases.push({ label: "ERC-4626 vault over a liquid asset (gtWETH / USDG vault shape) → ignored", address: await deployTimed(stranger, "Erc4626LikeVault", [realLend]), expect: expectNone });
+cases.push({ label: "ERC-4626 vault that also has migrate(uint256) (MATIC vault shape) → ignored", address: await deployTimed(stranger, "VaultWithMigrate", [realLend]), expect: expectNone });
+cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });
 cases.push({
   label: "migrate() + oldToken() but no target token → not alerted (re-checked later)",
   address: await deployTimed(stranger, "MigratorNoTarget", [oldTwin]),

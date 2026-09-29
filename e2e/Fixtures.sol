@@ -337,3 +337,50 @@ contract BytecodeDeployer {
         emit Deployed(a);
     }
 }
+
+/// ERC-4626 vault (gtWETH / USDG-vault shape): share token over a liquid asset.
+contract Erc4626LikeVault {
+    string public name = "Vault Share";
+    string public symbol = "vSHR";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply = 1e24;
+    address public asset;
+    mapping(address => uint256) public balanceOf;
+    constructor(address a) { asset = a; balanceOf[msg.sender] = totalSupply; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function totalAssets() external pure returns (uint256) { return 0; }
+    function convertToShares(uint256 a) external pure returns (uint256) { return a; }
+    function convertToAssets(uint256 s) external pure returns (uint256) { return s; }
+    function deposit(uint256, address) external pure returns (uint256) { return 0; }
+}
+
+/// ERC-4626 vault that also has migrate() (the MATIC-vault false positive).
+contract VaultWithMigrate {
+    string public name = "Staked Vault";
+    string public symbol = "sVLT";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply = 1e24;
+    address public asset;
+    mapping(address => uint256) public balanceOf;
+    constructor(address a) { asset = a; balanceOf[msg.sender] = totalSupply; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function totalAssets() external pure returns (uint256) { return 0; }
+    function convertToShares(uint256 a) external pure returns (uint256) { return a; }
+    function convertToAssets(uint256 s) external pure returns (uint256) { return s; }
+    function migrate(uint256) external {}
+}
+
+/// Meme token whose "migration" is its bonding-curve pool moving to a DEX (four.meme shape).
+contract MemePoolToken {
+    string public name = "Meme";
+    string public symbol = "MEME";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply = 1e24;
+    address public quoteToken;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => bool) public migratedPools;
+    constructor(address q) { quoteToken = q; balanceOf[msg.sender] = totalSupply; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function setMigratedPool(address p, bool v) external { migratedPools[p] = v; }
+    function setMigratedPools(address[] calldata ps, bool v) external { for (uint256 i; i < ps.length; i++) migratedPools[ps[i]] = v; }
+}
