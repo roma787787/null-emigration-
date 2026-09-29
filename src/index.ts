@@ -12,6 +12,7 @@ import {
 import { env } from "./config/env.js";
 import { custodianRepository, parseCustodianSeed } from "./db/repositories/custodianRepository.js";
 import { autoDiscoveryMode } from "./config/autoMode.js";
+import { planWatch } from "./config/watchPlan.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
 import { createBot, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
@@ -27,13 +28,14 @@ async function main() {
     await broadcastMigrationAlert(bot, analyzed);
   });
   const autoOn = autoDiscoveryMode() === "on";
-  const autoCovers = (network: string) =>
-    autoOn && (env.autoDiscoveryNetworks().length === 0 || env.autoDiscoveryNetworks().includes(network));
-  // RWA custodians are watched wherever auto-discovery doesn't already read
-  // every block: enabled networks without it, plus CUSTODIAN_NETWORKS.
-  const custodianNetworks = env.CUSTODIAN_WATCH
-    ? [...new Set([...enabledNetworks(), ...env.custodianNetworks().filter(isKnownNetwork)])].filter((n) => !autoCovers(n))
-    : [];
+  const plan = planWatch({
+    enabled: enabledNetworks(),
+    autoOn,
+    autoList: env.autoDiscoveryNetworks(),
+    custodianList: env.custodianNetworks().filter(isKnownNetwork),
+    custodianWatch: env.CUSTODIAN_WATCH,
+  });
+  const custodianNetworks = plan.custodians;
   const autoWorker =
     autoOn || custodianNetworks.length > 0
       ? startAutoDiscoveryWorker(async (analyzed) => {
@@ -87,7 +89,7 @@ async function main() {
               logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue analysis job");
             });
           },
-          autoCovers(network) ? enqueueAuto(network) : undefined,
+          plan.auto.includes(network) ? enqueueAuto(network) : undefined,
         ),
       );
       started.push(network);
