@@ -35,6 +35,14 @@ export function registerCallbacks(bot: Telegraf): void {
     await ctx.answerCbQuery();
   });
 
+  bot.action(/^settings:rwa:(on|off)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);
+    await chatSettingsRepository.setRwaListings(chatId, ctx.match[1] === "on");
+    const { text, keyboard } = await renderSettings(chatId);
+    await ctx.editMessageText(text, keyboard).catch(() => undefined);
+    await ctx.answerCbQuery();
+  });
+
   bot.action(/^settings:net:(.+)$/, async (ctx) => {
     const value = ctx.match[1]!;
     const chatId = String(ctx.chat?.id ?? ctx.callbackQuery.from.id);

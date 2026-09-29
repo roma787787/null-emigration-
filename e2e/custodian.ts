@@ -22,6 +22,7 @@ process.env.LOG_LEVEL ??= "fatal";
 process.env.NODE_ENV = "production";
 process.env.CUSTODIAN_POLL_MS = "500";
 process.env.AUTO_DEDUP_HOURS = "0"; // every migrator below shares one bytecode
+process.env.RWA_LISTING_WINDOW_MS = "2500"; // new-token cards: a short batch window for the test
 
 // --- counting RPC proxy -------------------------------------------------------------------
 const calls = new Map<string, number>();
@@ -90,6 +91,19 @@ async function call(from: typeof owner, to: Address, name: string, fn: string, a
 await runMigrations();
 await pool.query("TRUNCATE tokens, chat_settings, network_cursors, custodians RESTART IDENTITY CASCADE");
 await q.getAutoDiscoveryQueue().obliterate({ force: true });
+{
+  const { createRedisConnection } = await import("../src/queue/redisClient.js");
+  const r = createRedisConnection();
+  const stale = await r.keys("rwa:listing:*");
+  if (stale.length) await r.del(...stale);
+  r.disconnect();
+}
+const { ListingBatcher } = await import("../src/rwa/listings.js");
+type Batch = import("../src/rwa/listings.js").ListingBatch;
+const listingBatches: Batch[] = [];
+const listingBatcher = new ListingBatcher(async (batch) => {
+  listingBatches.push(batch);
+});
 
 const oldToken = await deploy(owner, "SimpleToken", ["Classic Stock", "OLDX", 10n ** 24n]);
 const newToken = await deploy(owner, "SimpleToken", ["Stock Token", "NEWX", 10n ** 24n]);
@@ -102,9 +116,12 @@ await custodianRepository.upsert(NETWORK, create2Factory, "CREATE2 Custodian");
 
 const lower = (a: string) => a.toLowerCase();
 const alerts = new Map<string, { at: number; record: NonNullable<Record_> }>();
-q.startAutoDiscoveryWorker(async ({ migrationContract }) => {
-  alerts.set(lower(migrationContract.contractAddress), { at: Date.now(), record: migrationContract });
-});
+q.startAutoDiscoveryWorker(
+  async ({ migrationContract }) => {
+    alerts.set(lower(migrationContract.contractAddress), { at: Date.now(), record: migrationContract });
+  },
+  (listing) => listingBatcher.add(listing),
+);
 let stop = startCustodianWatcher(NETWORK, (e) => q.enqueueAutoCandidate(e));
 await new Promise((r) => setTimeout(r, 1500));
 
@@ -165,17 +182,46 @@ async function expectCustodianAlert(label: string, address: Address, custodianLa
   const address = await call(operator, create2Factory, "MigratorFactory", "deploy", [oldToken, newToken, ("0x" + "55".repeat(32)) as Hex]);
   await expectCustodianAlert("custodian factory deploying with CREATE2", address, "CREATE2 Custodian", t0);
 }
+const listed = () => listingBatches.flatMap((b) => b.listings.map((l) => lower(l.address)));
 {
   const before = custodianWatchStatuses()[0]!.deployments;
+  const t0 = Date.now();
   const stock = await call(operator, stockFactory, "StockFactoryLike", "deployStock", ["Apple Stock Token", "AAPL"]);
   const outsider = await deploy(stranger, "MigratorWithGetters", [oldToken, newToken]);
-  await new Promise((r) => setTimeout(r, 4000));
-  check("a new stock token from the custodian is seen but not alerted (not a migration)", !alerts.has(lower(stock)) && custodianWatchStatuses()[0]!.deployments > before, {
-    alerted: alerts.has(lower(stock)),
-    deployments: custodianWatchStatuses()[0]!.deployments - before,
-  });
+  const until = Date.now() + 15_000;
+  while (!listed().includes(lower(stock)) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+  const batch = listingBatches.find((b) => b.listings.some((l) => lower(l.address) === lower(stock)));
+  const listing = batch?.listings[0];
+  check(
+    `a new stock token from the custodian: its own "new RWA token" card (AAPL — Apple Stock Token, issuer Stock Factory) in ${((Date.now() - t0) / 1000).toFixed(1)}s, not a migration alert`,
+    !!batch && batch.listings.length === 1 && listing?.symbol === "AAPL" && listing.name === "Apple Stock Token" && batch.issuer === "Stock Factory" && !alerts.has(lower(stock)),
+    { batch, alerted: alerts.has(lower(stock)) },
+  );
+  check("…and the watch counted it", custodianWatchStatuses()[0]!.deployments > before);
   check("a migrator from a non-custodian wallet is not the watch's business (auto-discovery's)", !alerts.has(lower(outsider)));
 }
+{
+  // A launch: 6 stock tokens in one block → one digest, not 6 cards.
+  const batchesBefore = listingBatches.length;
+  await anvilRpc("evm_setIntervalMining", [0]);
+  const { abi } = artifacts.StockFactoryLike!;
+  const hashes: Hex[] = [];
+  for (const [name, symbol] of [["Tesla Stock Token", "TSLA"], ["NVIDIA Stock Token", "NVDA"], ["Microsoft Stock Token", "MSFT"], ["Amazon Stock Token", "AMZN"], ["Alphabet Stock Token", "GOOGL"], ["Meta Stock Token", "META"]]) {
+    hashes.push(await operator.writeContract({ address: stockFactory, abi, functionName: "deployStock", args: [name, symbol] } as never));
+  }
+  await anvilRpc("evm_mine");
+  await anvilRpc("evm_setIntervalMining", [1]);
+  for (const hash of hashes) await chain.waitForTransactionReceipt({ hash });
+  const until = Date.now() + 20_000;
+  while (listingBatches.slice(batchesBefore).flatMap((b) => b.listings).length < 6 && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+  const newBatches = listingBatches.slice(batchesBefore);
+  check(
+    `a launch of 6 stock tokens in one block → ${newBatches.length} message(s): one digest of ${newBatches[0]?.listings.length ?? 0} (${newBatches[0]?.listings.map((l) => l.symbol).join(", ")})`,
+    newBatches.length === 1 && newBatches[0]!.listings.length === 6,
+    newBatches.map((b) => b.listings.length),
+  );
+}
+const listingsBeforeRestart = listed().length;
 
 // --- restart: a burst of 55 deployments in 55 blocks while the bot was down ---------------
 await stop();
@@ -208,6 +254,12 @@ check(
   `…reading only the blocks that had one: ${used.eth_getBlockByNumber ?? 0} block reads for 55 deployments`,
   (used.eth_getBlockByNumber ?? 0) <= 60,
   used,
+);
+await new Promise((r) => setTimeout(r, 4000));
+check(
+  `migrators are not "new tokens", and nothing is announced twice after the restart (${listed().length} listed in all)`,
+  listed().length === listingsBeforeRestart && new Set(listed()).size === listed().length,
+  listed().length,
 );
 const status = custodianWatchStatuses()[0]!;
 check(`/status data: custodians ${status.custodians}, deployments ${status.deployments}, no error`, status.custodians === 3 && status.deployments >= 55 && status.lastPollAt !== null, status);

@@ -258,6 +258,20 @@ poll — against ~10 full blocks a second on Robinhood Chain. Deployments made
 while the bot was down are found after a restart (resumes from the saved
 block), and `/status` has a line per watched network.
 
+**New RWA tokens (Robinhood stock listings).** Besides migrations, every
+new token a registered custodian launches — a new Robinhood stock token, a
+new Dinari dShare — is announced with its own card (symbol, name, issuer,
+network, contract, links). Issuers launch in batches (Robinhood once shipped
+500 in a day), so listings are grouped per issuer: a lone token waits
+`RWA_LISTING_WINDOW_MS` (20s) for company and goes out as its own card; a
+batch becomes ONE digest naming 20 tokens and counting the rest; after
+`RWA_LISTING_HOURLY_CAP` (10) separate cards in an hour the issuer is treated
+as launching and gets a digest every `RWA_LISTING_BUSY_WINDOW_MS` (15 min)
+while it lasts. Each chat switches this on or off in `/settings` ("New
+stocks", on by default); the networks filter applies. Costs next to nothing:
+the custodian watch already finds these deployments; a listing adds two
+reads (name, symbol) per token, no OKX quote.
+
 **Turning Robinhood on** (without full auto-discovery on those chains):
 
 ```
@@ -434,8 +448,9 @@ must alert within 10s and no spam may.
 counting RPC proxy: idle blocks cost no block reads at all; a migration
 contract deployed by a custodian wallet, by an operator calling the
 custodian's `StockFactory` (CREATE), through a forwarder/multisig, and by a
-CREATE2 custodian factory is alerted within seconds; a new stock token is seen
-but not alerted; a non-custodian's migrator is left to auto-discovery; and 55
+CREATE2 custodian factory is alerted within seconds; a new stock token is
+announced as a new RWA token (not a migration), and a launch of 6 in one block
+as ONE digest; a non-custodian's migrator is left to auto-discovery; and 55
 deployments in 55 blocks made while the bot was stopped are all found after
 the restart, reading only those 55 blocks.
 

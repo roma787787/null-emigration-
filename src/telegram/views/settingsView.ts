@@ -35,6 +35,7 @@ export function buildSettingsText(settings: ChatSettingsRecord, lang: Language):
     t(lang, "settings.liquidityLabel", {
       level: levelLabel(lang, settings.liquidityLevel),
     }),
+    t(lang, "settings.rwaLabel", { state: t(lang, settings.rwaListings ? "settings.on" : "settings.off") }),
   ].join("\n");
 }
 
@@ -84,11 +85,15 @@ export function buildSettingsKeyboard(
       "settings:auto:off",
     ),
   ];
+  const rwaRow = [
+    Markup.button.callback(`${t(lang, "settings.buttonRwaOn")}${checkmark(settings.rwaListings)}`, "settings:rwa:on"),
+    Markup.button.callback(`${t(lang, "settings.buttonRwaOff")}${checkmark(!settings.rwaListings)}`, "settings:rwa:off"),
+  ];
   const liquidityRows = LEVEL_ORDER.map((level) => [
     Markup.button.callback(`${levelLabel(lang, level)}${checkmark(settings.liquidityLevel === level)}`, `settings:liq:${level}`),
   ]);
 
-  return Markup.inlineKeyboard([confidenceRow, autoRow, ...liquidityRows, ...networkRows, allNetworksRow]);
+  return Markup.inlineKeyboard([confidenceRow, autoRow, ...liquidityRows, rwaRow, ...networkRows, allNetworksRow]);
 }
 
 function isNetworkActive(filter: NetworkKey[] | null, network: NetworkKey): boolean {

@@ -15,7 +15,8 @@ import { autoDiscoveryMode } from "./config/autoMode.js";
 import { planWatch } from "./config/watchPlan.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
 import { okxHealthSnapshot } from "./liquidity/okxLiquidity.js";
-import { createBot, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
+import { createBot, broadcastListings, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
+import { ListingBatcher } from "./rwa/listings.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
 import { logger } from "./utils/logger.js";
 
@@ -37,11 +38,16 @@ async function main() {
     custodianWatch: env.CUSTODIAN_WATCH,
   });
   const custodianNetworks = plan.custodians;
+  // New tokens from RWA custodians (Robinhood stock listings), grouped per issuer.
+  const listingBatcher = new ListingBatcher((batch) => broadcastListings(bot, batch));
   const autoWorker =
     autoOn || custodianNetworks.length > 0
-      ? startAutoDiscoveryWorker(async (analyzed) => {
-          await broadcastMigrationAlert(bot, analyzed);
-        })
+      ? startAutoDiscoveryWorker(
+          async (analyzed) => {
+            await broadcastMigrationAlert(bot, analyzed);
+          },
+          (listing) => listingBatcher.add(listing),
+        )
       : null;
   if (autoDiscoveryMode() === "paused-no-okx") {
     logger.warn(
@@ -126,6 +132,8 @@ async function main() {
     // next start resumes exactly where this one stopped.
     await Promise.all(stopListeners.map((stop) => stop().catch(() => undefined)));
     await Promise.all([worker.close(), autoWorker?.close(), ownerRefreshWorker?.close()]);
+    // Listings still waiting for their batch window go out now rather than being lost.
+    await listingBatcher.flushAll().catch(() => undefined);
     process.exit(0);
   };
 

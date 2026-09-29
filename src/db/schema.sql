@@ -90,6 +90,8 @@ ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS custodian_label TEXT;
 -- Per chat: liquidity test level for auto-discovered alerts, and whether to get them at all.
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS liquidity_level TEXT NOT NULL DEFAULT 'STRICT';
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS auto_alerts BOOLEAN NOT NULL DEFAULT true;
+-- New tokens launched by RWA custodians (a Robinhood stock token listing), per chat.
+ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS rwa_listings BOOLEAN NOT NULL DEFAULT true;
 
 -- Known deployers of tokenized stocks / RWA (Backed, Dinari, Robinhood...):
 -- their deployments are always analyzed and skip the DEX-liquidity filter.

@@ -22,3 +22,11 @@ export function dedupKeys(network: string, tokenA: string, tokenB: string | null
   const pair = [tokenA.toLowerCase(), (tokenB ?? "-").toLowerCase()].sort().join(":");
   return [`${network}:pair:${pair}`, `${network}:code:${codeHash}`];
 }
+
+const LISTING_TTL_SEC = 30 * 24 * 3600;
+
+/** True the first time a custodian's new token is seen (re-checks and restarts don't announce it again). */
+export async function firstListing(network: string, address: string): Promise<boolean> {
+  redis ??= createRedisConnection();
+  return (await redis.set(`rwa:listing:${network}:${address.toLowerCase()}`, "1", "EX", LISTING_TTL_SEC, "NX")) === "OK";
+}

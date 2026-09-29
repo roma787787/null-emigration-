@@ -11,6 +11,8 @@ import { registerCustodianCommands } from "./commands/custodians.js";
 import { registerCallbacks } from "./callbacks.js";
 import { registerAccessControl, isAdminChat } from "./accessControl.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
+import { formatListingAlert } from "./listingFormatter.js";
+import type { ListingBatch } from "../rwa/listings.js";
 import { chatSettingsRepository } from "../db/repositories/chatSettingsRepository.js";
 import type { AnalyzedMigration } from "../queue/notificationQueue.js";
 import type { OwnersRefreshed } from "../chain/ownerRefresh.js";
@@ -81,6 +83,24 @@ export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedM
       });
     } catch (err) {
       logger.error({ err, chatId: chat.chatId }, "Failed to deliver alert to chat");
+    }
+  }
+}
+
+/** A new RWA token (or a digest of a batch) to every approved chat that takes them on that network. */
+export async function broadcastListings(bot: Telegraf, batch: ListingBatch): Promise<void> {
+  const chats = await chatSettingsRepository.listAll();
+  for (const chat of chats) {
+    if (!chat.approved && !isAdminChat(chat.chatId)) continue;
+    if (!chat.rwaListings) continue;
+    if (chat.networksFilter && !chat.networksFilter.includes(batch.network)) continue;
+    try {
+      await sendWithRetry(bot, chat.chatId, formatListingAlert(batch, chat.language ?? DEFAULT_LANGUAGE), {
+        parse_mode: "MarkdownV2",
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (err) {
+      logger.error({ err, chatId: chat.chatId }, "Failed to deliver RWA listing to chat");
     }
   }
 }

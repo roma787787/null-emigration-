@@ -10,6 +10,7 @@ interface ChatSettingsRow {
   access_requested: boolean;
   liquidity_level: string;
   auto_alerts: boolean;
+  rwa_listings: boolean;
   created_at: Date;
 }
 
@@ -18,6 +19,7 @@ function toRecord(row: ChatSettingsRow): ChatSettingsRecord {
     chatId: row.chat_id,
     liquidityLevel: row.liquidity_level === "LOW_CAP" || row.liquidity_level === "DEEP" ? row.liquidity_level : "STRICT",
     autoAlerts: row.auto_alerts,
+    rwaListings: row.rwa_listings ?? true,
     confidenceFilter: row.confidence_filter as ConfidenceFilter,
     networksFilter: (row.networks_filter as NetworkKey[] | null) ?? null,
     language: row.language as Language | null,
@@ -57,6 +59,14 @@ export const chatSettingsRepository = {
     await pool.query(
       `INSERT INTO chat_settings (chat_id, auto_alerts) VALUES ($1, $2)
        ON CONFLICT (chat_id) DO UPDATE SET auto_alerts = EXCLUDED.auto_alerts`,
+      [chatId, enabled],
+    );
+  },
+
+  async setRwaListings(chatId: string, enabled: boolean): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_settings (chat_id, rwa_listings) VALUES ($1, $2)
+       ON CONFLICT (chat_id) DO UPDATE SET rwa_listings = EXCLUDED.rwa_listings`,
       [chatId, enabled],
     );
   },

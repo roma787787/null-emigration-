@@ -8,7 +8,8 @@ import { recheckOutcome } from "../analyzer/recheck.js";
 import { env } from "../config/env.js";
 import type { TrackedContractCreationEvent, UntrackedContractCreationEvent } from "../chain/blockListener.js";
 import { analyzeAutoCandidate, sourceOf } from "../analyzer/autoAnalyzer.js";
-import { dedupKeys, firstSighting } from "./autoDedup.js";
+import { dedupKeys, firstListing, firstSighting } from "./autoDedup.js";
+import { readListing, type RwaListing } from "../rwa/listings.js";
 import { checkLiquidityLevels, isOkxConfigured, type LiquidityCheck } from "../liquidity/okxLiquidity.js";
 import { noteAutoAlert, noteCandidate, noteLiquiditySkip, noteSkipped } from "../chain/autoStats.js";
 import { getPublicClient } from "../chain/provider.js";
@@ -290,7 +291,11 @@ function moreLiquid(alt: Record<LiquidityLevel, LiquidityCheck>, current: Record
  * address → OKX executable-route test on Token A → alert. Contracts from a
  * registered RWA custodian skip the DEX test (tokenized stocks trade off-DEX).
  */
-export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration) => Promise<void>): Worker {
+export function startAutoDiscoveryWorker(
+  onAnalyzed: (result: AnalyzedMigration) => Promise<void>,
+  /** A registered custodian's new token that is not a migration (a new stock token listing). */
+  onListing?: (listing: RwaListing) => void,
+): Worker {
   const worker = new Worker<AutoJobData>(
     AUTO_QUEUE_NAME,
     async (job) => {
@@ -300,6 +305,13 @@ export function startAutoDiscoveryWorker(onAnalyzed: (result: AnalyzedMigration)
       const outcome = await analyzeAutoCandidate(data.network, data.contractAddress, data.input);
       if (outcome.kind === "skipped") {
         noteSkipped(data.network, outcome.reason);
+        if (data.custodianLabel && onListing) {
+          const listing = await readListing(data.network, data.contractAddress, data.custodianLabel).catch((err) => {
+            logger.warn({ err, network: data.network, contractAddress: data.contractAddress }, "Reading a custodian token failed");
+            return null;
+          });
+          if (listing && (await firstListing(data.network, listing.address))) onListing(listing);
+        }
         if (outcome.recheck) await scheduleAutoRecheck(data, job.name === "auto-recheck" ? (data.attempt ?? 0) + 1 : 0);
         return;
       }

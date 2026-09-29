@@ -79,6 +79,8 @@ export interface ChatSettingsRecord {
   liquidityLevel: LiquidityLevel;
   /** Receive auto-discovered alerts (not only tracked projects'). */
   autoAlerts: boolean;
+  /** Receive a card for every new token an RWA custodian launches (e.g. a new Robinhood stock token). */
+  rwaListings: boolean;
   confidenceFilter: ConfidenceFilter;
   networksFilter: NetworkKey[] | null;
   /** null = the chat hasn't picked a language yet (shows the picker). */

@@ -110,7 +110,7 @@ const { refreshAllOwners } = await import("../src/chain/ownerRefresh.js");
 const { enqueueContractCreation, startContractCreationWorker, getContractCreationQueue } = await import(
   "../src/queue/notificationQueue.js"
 );
-const { createBot, broadcastMigrationAlert, notifyNewOwners } = await import("../src/telegram/bot.js");
+const { createBot, broadcastListings, broadcastMigrationAlert, notifyNewOwners } = await import("../src/telegram/bot.js");
 
 type Artifact = { abi: Abi; bytecode: Hex };
 const ARTIFACTS = process.env.E2E_ARTIFACTS ?? fileURLToPath(new URL("./artifacts.json", import.meta.url));
@@ -311,6 +311,31 @@ check("Low-Cap and auto-off are saved for the chat", alice?.liquidityLevel === "
 await click(ALICE, "settings:auto:on");
 alice = await chatSettingsRepository.get(String(ALICE));
 check("auto alerts can be switched back on", alice?.autoAlerts === true, alice);
+
+// New RWA tokens (Robinhood stock listings): a per-chat switch, on by default.
+check(
+  "/settings has the new-RWA-tokens switch, on by default",
+  settingsButtons.includes("settings:rwa:on") && settingsButtons.includes("settings:rwa:off") && alice?.rwaListings === true,
+  settingsButtons,
+);
+await click(ALICE, "settings:rwa:off");
+alice = await chatSettingsRepository.get(String(ALICE));
+check("new-RWA-tokens off is saved for the chat", alice?.rwaListings === false, alice);
+const stockListing = { network: NETWORK, issuer: "Robinhood Stock Tokens", address: "0x00000000000000000000000000000000000a4b1e" as Address, symbol: "AAPL", name: "Apple Inc." };
+const listingCalls = (fromIndex: number) =>
+  calls.slice(fromIndex).filter((c) => !c.rejected && c.method === "sendMessage" && String(c.body.text).includes(stockListing.address));
+const listingRecipients = (cs: Call[]) => cs.map((c) => Number(c.body.chat_id)).sort();
+let mark = calls.length;
+await broadcastListings(bot, { network: NETWORK, issuer: stockListing.issuer, listings: [stockListing] });
+check("a new stock token reaches the admin, not Alice (switched off), Bob (rejected) or Carol (network off)", listingRecipients(listingCalls(mark)).join() === `${ADMIN}`, listingRecipients(listingCalls(mark)));
+await click(ALICE, "settings:rwa:on");
+mark = calls.length;
+await broadcastListings(bot, { network: NETWORK, issuer: stockListing.issuer, listings: [stockListing] });
+check(
+  "switched back on: Alice gets it too, in Ukrainian, as valid MarkdownV2",
+  listingRecipients(listingCalls(mark)).join() === `${ADMIN},${ALICE}` && has(textsTo(listingCalls(mark), ALICE), /НОВИЙ RWA[\s\S]*AAPL[\s\S]*Apple Inc/),
+  listingCalls(mark).map((c) => [c.body.chat_id, c.body.text]),
+);
 
 section = "custodians";
 r = await send(ALICE, "/custodians");

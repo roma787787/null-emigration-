@@ -6,7 +6,7 @@ function shorten(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-function escapeMd(text: string): string {
+export function escapeMd(text: string): string {
   return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, "\\$1");
 }
 
