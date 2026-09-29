@@ -25,6 +25,7 @@ process.env.NODE_ENV = "production";
 process.env.RECHECK_DELAYS_SEC = "3,6,12";
 process.env.AUTO_DISCOVERY = "true";
 process.env.OKX_MIN_INTERVAL_MS = "20";
+process.env.AUTO_TRACE_MODE = "block"; // the factory cases below hold the child's code themselves; "calldata" gets its own check
 process.env.AUTO_DEDUP_HOURS = "0"; // many cases reuse the same tokens / code; dedup gets its own check below
 
 // --- signature DB stub --------------------------------------------------------------
@@ -476,6 +477,24 @@ const spamAlerts = spamAddresses.filter((a) => alerts.has(a)).length;
 check(`the block really holds ${loadBlock.transactions.length} deployments`, loadBlock.transactions.length >= 151, loadBlock.transactions.length);
 check(`the migration among them alerted ${loadLatency.toFixed(1)}s after the block was mined (≤ 10s)`, loadLatency <= 10, loadLatency);
 check(`spam filtered: ${spamAlerts} alerts out of 150 spam contracts (pools, fee tokens, plain tokens, counters)`, spamAlerts === 0, spamAlerts);
+
+// --- "calldata" trace mode (the production default): only calls shipping creation code are traced
+process.env.AUTO_TRACE_MODE = "calldata";
+const bytecodeDeployer = await deploy(stranger, "BytecodeDeployer");
+const { abi: bdAbi } = artifacts.BytecodeDeployer!;
+const { encodeDeployData } = await import("viem");
+const childCode = encodeDeployData({ abi: artifacts.MigratorWithGetters!.abi, bytecode: artifacts.MigratorWithGetters!.bytecode, args: [realLend, newToken2] } as never);
+const childSalt = ("0x" + "44".repeat(32)) as Hex;
+const childAddress = (await chain.simulateContract({ account: stranger.account, address: bytecodeDeployer, abi: bdAbi, functionName: "deploy", args: [childCode, childSalt] })).result as Address;
+const calldataT0 = Date.now();
+await chain.waitForTransactionReceipt({ hash: await stranger.writeContract({ address: bytecodeDeployer, abi: bdAbi, functionName: "deploy", args: [childCode, childSalt] } as never) });
+const calldataUntil = Date.now() + 20_000;
+while (!alerts.has(lower(childAddress)) && Date.now() < calldataUntil) await new Promise((r) => setTimeout(r, 200));
+check(
+  `"calldata" trace mode: CREATE2 via a deployer that receives the code in calldata is found (${alerts.has(lower(childAddress)) ? ((alerts.get(lower(childAddress))!.at - calldataT0) / 1000).toFixed(1) + "s" : "never"}) — no block trace`,
+  alerts.has(lower(childAddress)) && eq(alerts.get(lower(childAddress))!.record.tokenAAddress, realLend),
+);
+process.env.AUTO_TRACE_MODE = "block";
 
 // --- dedup: the same migrator redeployed (same pair, same code) alerts once --------------------
 process.env.AUTO_DEDUP_HOURS = "24";

@@ -47,6 +47,23 @@ export const env = {
   AUTO_CONCURRENCY: Number(process.env.AUTO_CONCURRENCY ?? 8),
   // An auto alert for the same token pair, or for a contract with the same
   // code (clones, bot fleets), isn't repeated within this many hours. 0 = off.
+  /**
+   * How auto-discovery finds factory (CREATE/CREATE2) deployments:
+   *  - "calldata" (default): trace only transactions whose calldata carries
+   *    contract creation code (CREATE2 deployers, clone factories) — a tiny
+   *    share of traffic, so a tiny share of the tracing bill;
+   *  - "block": trace every block (debug_traceBlockByNumber / trace_block) —
+   *    catches factories that hold the child's code themselves, but costs
+   *    one heavy trace call per block;
+   *  - "off": direct deployments only.
+   * AUTO_BLOCK_TRACE_NETWORKS forces "block" on the listed networks.
+   */
+  autoTraceMode(network: string): "calldata" | "block" | "off" {
+    if (parseList(process.env.AUTO_BLOCK_TRACE_NETWORKS).map((k) => k.toLowerCase()).includes(network)) return "block";
+    const mode = (process.env.AUTO_TRACE_MODE ?? "calldata").toLowerCase();
+    return mode === "block" || mode === "off" ? mode : "calldata";
+  },
+
   get AUTO_DEDUP_HOURS(): number {
     return Number(process.env.AUTO_DEDUP_HOURS ?? 24);
   },

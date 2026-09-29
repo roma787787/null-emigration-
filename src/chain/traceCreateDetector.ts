@@ -105,6 +105,21 @@ export async function findFactoryCreatedContracts(
   }
 }
 
+// Solidity creation code opens with PUSH1 0x80..0xe0 PUSH1 0x40 MSTORE (the
+// free-memory pointer); EIP-1167 clones are created from a fixed prefix.
+const INIT_CODE_MARKER = /60[89a-f]0604052|3d602d80600a3d3981f3/;
+const MIN_INIT_CODE_HEX = 100;
+
+/**
+ * Whether a call's calldata carries contract creation code — the shape of a
+ * deployment through a CREATE2 deployer or clone factory. Only those calls
+ * get a (costly) trace in "calldata" mode.
+ */
+export function carriesInitCode(input: string): boolean {
+  if (input.length < 10 + MIN_INIT_CODE_HEX) return false;
+  return INIT_CODE_MARKER.test(input.slice(10).toLowerCase());
+}
+
 // --- whole-block tracing (auto-discovery) -----------------------------------------
 
 export interface BlockCreate extends TracedCreate {

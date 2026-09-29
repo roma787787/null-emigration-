@@ -4,7 +4,7 @@ import { getPublicClient, networkHasWebSocket, resetWebSocketConnections } from 
 import { ownerRepository } from "../db/repositories/ownerRepository.js";
 import { networkCursorRepository } from "../db/repositories/networkCursorRepository.js";
 import { initListenerStatus, recordListenerError } from "./listenerStatus.js";
-import { findBlockCreates, findFactoryCreatedContracts } from "./traceCreateDetector.js";
+import { carriesInitCode, findBlockCreates, findFactoryCreatedContracts } from "./traceCreateDetector.js";
 import { custodianRepository } from "../db/repositories/custodianRepository.js";
 import { noteBlockSeen, noteCreationSeen } from "./autoStats.js";
 import { env } from "../config/env.js";
@@ -283,7 +283,8 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
 
   // With auto-discovery on, one trace of the whole block yields every
   // contract created in it, factory-made ones included.
-  const traced = autoDiscovery && env.ENABLE_FACTORY_TRACE_DETECTION ? await findBlockCreates(client, network, blockNumber) : null;
+  const traceMode = autoDiscovery && env.ENABLE_FACTORY_TRACE_DETECTION ? env.autoTraceMode(network) : "off";
+  const traced = traceMode === "block" ? await findBlockCreates(client, network, blockNumber) : null;
   const seen = new Set<string>();
 
   const dispatch = async (
@@ -342,8 +343,20 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
 
     // A tracked wallet calling a factory: trace that transaction (unless the
     // whole block was already traced above).
-    if (!tracked || traced || !env.ENABLE_FACTORY_TRACE_DETECTION) continue;
-    const created = await findFactoryCreatedContracts(client, network, tx.hash);
-    for (const { address, input } of created) await dispatch(address, tx.from as Address, tx.hash, input, "factory");
+    if (traced || !env.ENABLE_FACTORY_TRACE_DETECTION) continue;
+    if (tracked) {
+      const created = await findFactoryCreatedContracts(client, network, tx.hash);
+      for (const { address, input } of created) await dispatch(address, tx.from as Address, tx.hash, input, "factory");
+      continue;
+    }
+    // Auto-discovery in "calldata" mode: trace only calls that ship creation
+    // code (CREATE2 deployers, clone factories) — not every block.
+    if (traceMode !== "calldata" || !handlers.untracked || !carriesInitCode(tx.input)) continue;
+    try {
+      const created = await findFactoryCreatedContracts(client, network, tx.hash);
+      for (const c of created) await dispatch(c.address, tx.from as Address, tx.hash, c.input, "factory", c.createdBy);
+    } catch (err) {
+      logger.warn({ err, network, txHash: tx.hash }, "Trace of a deploy-carrying call failed; skipping it");
+    }
   }
 }

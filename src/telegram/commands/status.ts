@@ -156,7 +156,10 @@ export async function collectStatus(): Promise<StatusReport> {
         listener: getListenerStatus(network),
         head: await chainHead(network),
         trace: env.ENABLE_FACTORY_TRACE_DETECTION ? traceDetectionStatus(network) : "off",
-        blockTrace: autoMode === "on" && env.ENABLE_FACTORY_TRACE_DETECTION ? blockTraceStatus(network) : "off",
+        blockTrace:
+          autoMode === "on" && env.ENABLE_FACTORY_TRACE_DETECTION && env.autoTraceMode(network) === "block"
+            ? blockTraceStatus(network)
+            : "off",
         okx: okxConfigured ? (okxHealthSnapshot(network) ?? "pending") : null,
       })),
     ),

@@ -163,10 +163,15 @@ find migrations. For every block on every enabled network:
 
 1. **Every contract created** is collected: direct deployments (address from
    sender + nonce, no extra RPC call) and factory `CREATE`/`CREATE2`
-   deployments from one whole-block trace — `debug_traceBlockByNumber`
-   (Geth-style) or `trace_block` (Erigon/Parity-style), whichever the RPC
-   offers. If neither works the network is paused for tracing for 6h and
-   `/status` says so; direct deployments are still covered.
+   deployments. `AUTO_TRACE_MODE` picks how factories are traced:
+   `calldata` (default) traces only calls whose calldata carries creation
+   code — CREATE2 deployers (CreateX, Arachnid), clone factories — a tiny
+   share of traffic; `block` traces every block with
+   `debug_traceBlockByNumber` / `trace_block` (also catches factories that
+   hold the child's code themselves, but costs one heavy call per block —
+   on Alchemy across 12 networks that ran to ~9,000 CU/s);
+   `AUTO_BLOCK_TRACE_NETWORKS=ethereum` enables `block` for chosen networks
+   only; `off` = direct deployments only.
 2. **Signature gate** — kept only if the dispatcher has a `migrate*` /
    `convert*` function, an `oldToken()`-style getter (`oldToken`,
    `legacyToken`, `previousToken`, `v1Token`…; not `tokenIn`/`fromToken`,

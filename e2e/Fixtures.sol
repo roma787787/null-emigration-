@@ -327,3 +327,13 @@ contract MigratorNoTarget {
     constructor(address a) { oldToken = a; }
     function migrate(uint256) external {}
 }
+
+/// CREATE2 deployer that receives the creation code in calldata (CreateX / Arachnid shape).
+contract BytecodeDeployer {
+    event Deployed(address a);
+    function deploy(bytes memory code, bytes32 salt) external returns (address a) {
+        assembly { a := create2(0, add(code, 0x20), mload(code), salt) }
+        require(a != address(0));
+        emit Deployed(a);
+    }
+}
