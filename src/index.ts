@@ -14,6 +14,7 @@ import { custodianRepository, parseCustodianSeed } from "./db/repositories/custo
 import { autoDiscoveryMode } from "./config/autoMode.js";
 import { planWatch } from "./config/watchPlan.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
+import { okxHealthSnapshot } from "./liquidity/okxLiquidity.js";
 import { createBot, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
 import { logger } from "./utils/logger.js";
@@ -104,6 +105,10 @@ async function main() {
       logger.error({ err, network }, "Failed to start custodian watch for network");
     }
   }
+
+  // OKX health per auto network in the background (through the rate limiter),
+  // so the first /status already shows which chains OKX can quote.
+  if (autoOn) for (const network of plan.auto) okxHealthSnapshot(network);
 
   const ownerRefreshWorker = await startOwnerRefresh((result) => notifyNewOwners(bot, result)).catch((err) => {
     logger.error({ err }, "Failed to start periodic owner refresh");

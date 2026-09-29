@@ -124,7 +124,10 @@ npm run dev                # or: npm run build && npm start
 - `OKX_MIN_INTERVAL_MS` — optional (default `1100`); OKX rate-limits DEX
   API keys (error 50011), so quotes go out one at a time this far apart and
   a 50011 is waited out and retried. `/status` shows cached OKX health
-  (refreshed in the background every 10 min) instead of querying each time.
+  (checked for every auto-discovery network at startup, refreshed in the
+  background every 10 min) instead of querying each time. `OKX ❌` on a
+  network means OKX can't quote there (unsupported chain, wrong quote
+  token): no auto alert can pass the liquidity filter on it.
 - `AUTO_DEDUP_HOURS` — optional (default `24`, `0` disables).
 - `QUOTE_TOKEN_<NETWORK>` — optional override of the stablecoin the test
   swaps from, `<address>:<decimals>[:<symbol>]` (defaults: USDT, or USDC /
