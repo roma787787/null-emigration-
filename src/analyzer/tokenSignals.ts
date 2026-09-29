@@ -62,6 +62,19 @@ export function hasBotCallbacks(selectors: Hex[]): boolean {
   return BOT_CALLBACKS.some((s) => selectors.includes(s));
 }
 
+// Launchpad (four.meme-style) tokens: settings for the pool the token
+// "migrates" to when its bonding curve graduates — liquidity plumbing, not a
+// token migration, whatever else the token calls a function.
+const LAUNCHPAD_POOL_SETTINGS = [
+  "setMigratedPool(address,bool)",
+  "setMigratedPools(address[],bool)",
+  "migratedPools(address)",
+].map((sig) => toFunctionSelector(sig));
+
+export function isLaunchpadToken(selectors: Hex[]): boolean {
+  return LAUNCHPAD_POOL_SETTINGS.some((s) => selectors.includes(s));
+}
+
 // What a deposit / lending wrapper returns as the asset it wraps: Aave's
 // aTokens, Compound's cTokens, ERC-4626 shares.
 const UNDERLYING_GETTERS = ["UNDERLYING_ASSET_ADDRESS()", "underlying()", "asset()"].map((sig) => toFunctionSelector(sig));

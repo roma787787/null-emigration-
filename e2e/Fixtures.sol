@@ -416,3 +416,35 @@ contract CallbackBotMigrate {
     function migrate(address to) external { SimpleToken(a).transfer(to, 1); SimpleToken(b).transfer(to, 1); }
     function uniswapV3SwapCallback(int256, int256, bytes calldata) external {}
 }
+
+/// four.meme-style token (BSC cards: BNC4 / NVDAB / QQQB…): pool-graduation
+/// settings plus a function that is itself named migrate — still a launchpad token.
+contract LaunchpadTokenWithMigrate {
+    string public name = "Launch";
+    string public symbol = "LNCH";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply = 1e24;
+    address public quoteToken;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => bool) public migratedPools;
+    constructor(address q) { quoteToken = q; balanceOf[msg.sender] = totalSupply; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function setMigratedPool(address p, bool v) external { migratedPools[p] = v; }
+    function setMigratedPools(address[] calldata ps, bool v) external { for (uint256 i; i < ps.length; i++) migratedPools[ps[i]] = v; }
+    function migrate() external {}
+}
+
+/// Launch token with graduation phases (BSC cards: FXIon / NVDAB …7777).
+contract PhasedLaunchToken {
+    string public name = "Phased";
+    string public symbol = "PHSD";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply = 1e24;
+    address public quoteToken;
+    bool public migrating;
+    mapping(address => uint256) public balanceOf;
+    constructor(address q) { quoteToken = q; balanceOf[msg.sender] = totalSupply; }
+    function transfer(address to, uint256 v) external returns (bool) { balanceOf[msg.sender] -= v; balanceOf[to] += v; return true; }
+    function startMigration() external { migrating = true; }
+    function finalizeMigration() external { migrating = false; }
+}

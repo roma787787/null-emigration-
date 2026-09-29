@@ -31,3 +31,11 @@ test("swap / flash-loan callbacks mark a bot, not a migrator", async () => {
   assert.equal(hasBotCallbacks([sel("receiveFlashLoan(address[],uint256[],uint256[],bytes)")]), true);
   assert.equal(hasBotCallbacks([sel("migrate(uint256)"), sel("oldToken()"), sel("newToken()")]), false);
 });
+
+test("pool-graduation settings mark a launchpad token", async () => {
+  const { isLaunchpadToken } = await import("./tokenSignals.js");
+  const sel = (s: string) => toFunctionSelector(s);
+  assert.equal(isLaunchpadToken([sel("migrate()"), sel("setMigratedPool(address,bool)")]), true);
+  assert.equal(isLaunchpadToken([sel("migratedPools(address)")]), true);
+  assert.equal(isLaunchpadToken([sel("migrate(uint256)"), sel("oldToken()"), sel("newToken()")]), false);
+});

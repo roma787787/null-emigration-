@@ -192,7 +192,9 @@ find migrations. For every block on every enabled network:
    without is re-checked later. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
    ERC-4626 vaults (`asset()` + `totalAssets()` + `convertTo*` — even with a `migrate()`),
    trading / flash-loan bots (`uniswapV3SwapCallback`, `uniswapV2Call`,
-   `executeOperation`, `receiveFlashLoan`, `onFlashLoan`…),
+   `executeOperation`, `receiveFlashLoan`, `onFlashLoan`…), launchpad
+   (four.meme-style) tokens with pool-graduation settings (`setMigratedPool`,
+   `migratedPools` — even with a function named `migrate`),
    ERC-20s whose only "swap" is fee plumbing (`swapTokensForEth`), contracts
    that reference no other token.
 3. **Token A / Token B by address only** — every ERC-20 the contract returns

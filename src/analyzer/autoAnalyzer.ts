@@ -13,6 +13,7 @@ import {
   hasBotCallbacks,
   hasOldTokenGetter,
   isErc4626Vault,
+  isLaunchpadToken,
   isLiquidityPool,
   isMigrationAction,
   looksLikeProxy,
@@ -107,6 +108,7 @@ export async function analyzeAutoCandidate(
   if (isLiquidityPool(selectors)) return { kind: "skipped", reason: "liquidity pool" };
   if (isErc4626Vault(selectors)) return { kind: "skipped", reason: "ERC-4626 vault" };
   if (hasBotCallbacks(selectors)) return { kind: "skipped", reason: "swap / flash-loan callbacks (bot)" };
+  if (isLaunchpadToken(selectors)) return { kind: "skipped", reason: "launchpad token (pool graduation settings)" };
   if (!implementation && looksLikeProxy(selectors) && strong.length === 0) {
     return { kind: "skipped", reason: "proxy without implementation", recheck: true };
   }

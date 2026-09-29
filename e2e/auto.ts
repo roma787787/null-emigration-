@@ -41,6 +41,7 @@ const KNOWN = [
   "admin()", "changeAdmin(address)", "createPair(address,address)", "setTokens(address,address)", "totalSupply()", "balanceOf(address)", "transfer(address,uint256)",
   "name()", "symbol()", "decimals()", "deploy(address,address,bytes32)",
   "migrate(address)", "uniswapV3SwapCallback(int256,int256,bytes)", "UNDERLYING_ASSET_ADDRESS()",
+  "migrate()", "startMigration()", "finalizeMigration()", "migrating()",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -387,6 +388,17 @@ cases.push({
 cases.push({ label: "ERC-4626 vault over a liquid asset (gtWETH / USDG vault shape) → ignored", address: await deployTimed(stranger, "Erc4626LikeVault", [realLend]), expect: expectNone });
 cases.push({ label: "ERC-4626 vault that also has migrate(uint256) (MATIC vault shape) → ignored", address: await deployTimed(stranger, "VaultWithMigrate", [realLend]), expect: expectNone });
 cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });
+// BSC cards (BNC4 / NVDAB / QQQB / FXIon…): launchpad tokens whose quote token trades.
+cases.push({
+  label: "launchpad token with pool-graduation settings AND a function named migrate() → ignored",
+  address: await deployTimed(stranger, "LaunchpadTokenWithMigrate", [realLend]),
+  expect: expectNone,
+});
+cases.push({
+  label: "launch token with startMigration() / finalizeMigration() phases → ignored",
+  address: await deployTimed(stranger, "PhasedLaunchToken", [realLend]),
+  expect: expectNone,
+});
 // Production false positives on Optimism / Base: a bot with migrate(address) +
 // uniswapV3SwapCallback, and Aave's aWETH as "Token A".
 cases.push({
