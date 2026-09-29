@@ -8,6 +8,7 @@ import { registerSettingsCommand } from "./commands/settings.js";
 import { registerAnalyzeCommand } from "./commands/analyze.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerCustodianCommands } from "./commands/custodians.js";
+import { registerBackfillCommands } from "./commands/backfill.js";
 import { registerCallbacks } from "./callbacks.js";
 import { registerAccessControl, isAdminChat } from "./accessControl.js";
 import { formatMigrationAlert } from "./notificationFormatter.js";
@@ -38,6 +39,7 @@ export function createBot(token: string): Telegraf {
   registerAnalyzeCommand(bot);
   registerStatusCommand(bot);
   registerCustodianCommands(bot);
+  registerBackfillCommands(bot);
   registerCallbacks(bot);
 
   bot.catch((err, ctx) => {

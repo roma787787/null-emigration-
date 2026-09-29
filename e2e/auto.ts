@@ -198,6 +198,9 @@ const chat = (liquidityLevel: "STRICT" | "LOW_CAP" | "DEEP", autoAlerts = true) 
   ({ chatId: "c", liquidityLevel: liquidityLevel as "STRICT" | "LOW_CAP" | "DEEP", autoAlerts, confidenceFilter: "ALL", networksFilter: null, language: "en", approved: true, accessRequested: true, createdAt: new Date() }) as const;
 const strictChat = chat("STRICT"), lowCapChat = chat("LOW_CAP"), deepChat = chat("DEEP"), trackedOnlyChat = chat("STRICT", false);
 
+// History backfill (at the end) re-runs every block from here on.
+const scanFrom = (await chain.getBlockNumber()) + 1n;
+
 // --- scenarios ------------------------------------------------------------------------------
 const cases: Array<{ label: string; address: Address; expect: (r: NonNullable<Record_> | undefined) => string | null }> = [];
 const expectAlert = (fn: (r: NonNullable<Record_>) => string | null) => (r: NonNullable<Record_> | undefined) => (r ? fn(r) : "no alert");
@@ -545,6 +548,11 @@ process.env.AUTO_TRACE_MODE = "block";
 
 // --- dedup: the same migrator redeployed (same pair, same code) alerts once --------------------
 process.env.AUTO_DEDUP_HOURS = "24";
+// A clone with no market first: dropped by OKX, it must NOT count as "already alerted" for the code.
+const liquiditySkipsBefore = autoStats(NETWORK)?.liquiditySkipped ?? 0;
+const noMarketClone = lower(await deploy(stranger, "MigratorWithGetters", [illiquid, newToken2]));
+const noMarketUntil = Date.now() + 20_000;
+while ((autoStats(NETWORK)?.liquiditySkipped ?? 0) === liquiditySkipsBefore && Date.now() < noMarketUntil) await new Promise((r) => setTimeout(r, 200));
 const dupFirst = lower(await deploy(stranger, "MigratorWithGetters", [oldTwin, newToken2]));
 const dupSecond = lower(await deploy(stranger, "MigratorWithGetters", [oldTwin, newToken2]));
 const dupUntil = Date.now() + 20_000;
@@ -554,6 +562,55 @@ check("dedup: a redeploy of the same migrator (same tokens, same code) alerts on
   first: alerts.has(dupFirst),
   second: alerts.has(dupSecond),
 });
+check(
+  "dedup: an earlier clone dropped for having no market doesn't block the next one (same code, token with a market)",
+  !alerts.has(noMarketClone) && alerts.has(dupFirst),
+  { noMarketClone: alerts.has(noMarketClone), next: alerts.has(dupFirst) },
+);
+
+// --- history backfill: every block of this test through the same pipeline, no alerts sent ----
+{
+  const { runBackfill, backfillCsv, decisionCounts } = await import("../src/backfill/backfill.js");
+  const { formatBackfillSummary } = await import("../src/telegram/commands/backfill.js");
+  const statsBefore = JSON.stringify(autoStats(NETWORK));
+  const alertsBefore = alerts.size;
+  const toBlock = await chain.getBlockNumber();
+  const total = Number(toBlock - scanFrom + 1n);
+  const t0 = Date.now();
+  let progressCalls = 0;
+  const report = await runBackfill({ network: NETWORK, fromBlock: scanFrom, toBlock, blocksPerSec: 1000, concurrency: 8, onProgress: () => void progressCalls++ });
+  const byAddress = new Map(report.candidates.map((c) => [lower(c.contractAddress), c]));
+  const counts = decisionCounts(report);
+  check(
+    `backfill: ${report.blocksScanned}/${total} blocks, ${report.contracts} new contracts, ${report.candidates.length} candidates in ${((Date.now() - t0) / 1000).toFixed(1)}s (${JSON.stringify(counts)})`,
+    report.blocksScanned === total && report.blocksFailed === 0 && report.analysisErrors === 0 && report.contracts >= 180 && progressCalls === 3,
+    { scanned: report.blocksScanned, failed: report.blocksFailed, errors: report.analysisErrors, contracts: report.contracts, progressCalls },
+  );
+  const firstCase = cases[0]!;
+  check(
+    "backfill finds what went live: the first untracked migrator is an alert with the same Token A",
+    byAddress.get(lower(firstCase.address))?.decision === "alert" && eq(byAddress.get(lower(firstCase.address))?.tokenAAddress, oldTwin),
+    byAddress.get(lower(firstCase.address)),
+  );
+  const liveAuto = [...alerts.entries()].filter(([, a]) => !a.tracked).map(([address]) => address);
+  const missing = liveAuto.filter((address) => !byAddress.has(address));
+  check(`every one of the ${liveAuto.length} live auto alerts is a backfill candidate too`, missing.length === 0, missing);
+  const spamFound = spamAddresses.filter((a) => byAddress.has(lower(a)));
+  check("backfill drops the 150 spam contracts of the load block as well", spamFound.length === 0, spamFound);
+  check(
+    "backfill sends nothing and leaves the live /status counters alone",
+    alerts.size === alertsBefore && JSON.stringify(autoStats(NETWORK)) === statsBefore,
+    { alerts: alerts.size - alertsBefore },
+  );
+  const csv = backfillCsv(report);
+  const summary = formatBackfillSummary("ru", report);
+  check(
+    "backfill report: CSV with a row per candidate, summary lists the would-be alerts",
+    csv.trim().split("\n").length === report.candidates.length + 1 && csv.startsWith("block,decision,contract") &&
+      /Был бы алерт: \d+/.test(summary) && summary.toLowerCase().includes(lower(firstCase.address)),
+    summary,
+  );
+}
 
 await stop();
 console.log(failures === 0 ? "\nALL PASSED" : `\n${failures} FAILURE(S)`);

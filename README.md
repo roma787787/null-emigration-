@@ -224,7 +224,7 @@ find migrations. For every block on every enabled network:
    dropped. Results are cached per token for 5 minutes; an OKX outage is
    retried rather than cached.
 5. **Dedup** — the same token pair, or the same contract code (clones, bot
-   fleets), alerts once per `AUTO_DEDUP_HOURS` (default 24).
+   fleets), alerts once per `AUTO_DEDUP_HOURS` (default 24) — only alerts count: a clone dropped for having no market doesn't block a later one whose token trades.
 6. **Alert** to every approved chat that has auto alerts on and whose level
    the token passes. The card shows the source (auto-discovery), Token A's
    full address, and the test swaps (`$1,000 → 0.80% ✅ · $300 → 0.20% ✅`).
@@ -308,6 +308,7 @@ projects' alerts are unaffected.
 /analyze <network> <deploy_tx_hash> [token_a]     Analyze any already-deployed contract on demand
 /status                                           Admins only: per-network health, lag, errors, queue, auto-discovery, OKX
 /custodians, /add_custodian, /remove_custodian    Admins only: RWA deployer registry
+/backfill <network> <range>, /backfill_stop       Admins only: run past blocks through the filters, get a report
 ```
 
 `/status` shows, per enabled network: 🟢/🟡/🔴 (last block processed under
@@ -316,6 +317,17 @@ block and how far behind the chain head it is, whether factory tracing works
 on that RPC, plus blocks skipped after a long downtime, blocks that failed
 every retry, and the last RPC error. Also totals (tokens, wallets, detected
 contracts) and the analysis queue, including scheduled re-checks.
+
+`/backfill ethereum 7d` (also `12h`, or `5000` for the last 5,000 blocks; up
+to 31 days) runs past blocks through exactly the live pipeline — contract
+discovery, analysis, filters, dedup, the OKX test — in the background, at
+`BACKFILL_BLOCKS_PER_SEC` (default 3, so the live bot keeps its RPC share;
+a week of Ethereum is ~50,400 blocks, ~4.7 h, roughly 5M Alchemy CU).
+Nothing is sent to chats, stored as a detection or counted in `/status`; the
+admin gets progress every 25%, then a summary (would-be alerts, drops by
+reason) and a CSV of every candidate with its decision and liquidity per
+level. `/backfill_stop` ends it early and still reports. A redeploy during a
+run cancels it.
 
 `/analyze` runs the same analyzer on the contract(s) an already-mined
 transaction created — a direct deploy or a factory call — and replies with

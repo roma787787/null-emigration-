@@ -239,6 +239,26 @@ export function startBlockListener(
   };
 }
 
+/**
+ * Every contract created in one block, found exactly as the live listener
+ * finds them (direct deploys, factory CREATE/CREATE2 per the trace mode),
+ * without touching /status counters — for the history backfill.
+ */
+export async function collectBlockCreations(network: NetworkKey, blockNumber: bigint): Promise<UntrackedContractCreationEvent[]> {
+  const out: UntrackedContractCreationEvent[] = [];
+  await processBlock(
+    network,
+    blockNumber,
+    {
+      // A tracked owner's deploy is simply one more contract here.
+      tracked: ({ tokenIds: _ids, ...event }) => void out.push({ ...event, custodianLabel: null }),
+      untracked: (event) => void out.push(event),
+    },
+    false,
+  );
+  return out;
+}
+
 const BLOCK_RETRY_DELAYS_MS = [1_000, 3_000, 10_000];
 
 // A transient RPC/Redis failure must not silently drop a block's deployments,
@@ -266,7 +286,7 @@ async function processBlockWithRetry(network: NetworkKey, blockNumber: bigint, h
   }
 }
 
-async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: Handlers) {
+async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: Handlers, liveStats = true) {
   const autoDiscovery = handlers.untracked !== undefined;
   if (!autoDiscovery && !(await anyOwnersTracked())) return;
   const client = getPublicClient(network);
@@ -274,7 +294,7 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
 
   const txs = block.transactions.filter((tx): tx is Exclude<typeof tx, string> => typeof tx === "object");
   if (txs.length === 0) return;
-  noteBlockSeen(network);
+  if (liveStats) noteBlockSeen(network);
 
   const uniqueSenders = [...new Set(txs.map((tx) => tx.from as Address))];
   const ownerMap = await ownerRepository.findTokenIdsForAddresses(uniqueSenders);
@@ -309,7 +329,7 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
       return;
     }
     if (!handlers.untracked) return;
-    noteCreationSeen(network);
+    if (liveStats) noteCreationSeen(network);
     // A custodian is recognised by the wallet sending the tx or by the factory
     // contract that ran the CREATE (e.g. Dinari's DShareFactory).
     const custodianLabel =

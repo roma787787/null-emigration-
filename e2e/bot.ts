@@ -20,6 +20,7 @@ process.env.NETWORK_ANVIL_NAME = "Anvil (local)";
 process.env.RPC_ANVIL ??= "ws://127.0.0.1:8545,http://127.0.0.1:8545";
 process.env.ENABLED_NETWORKS = NETWORK;
 process.env.LOG_LEVEL ??= "error";
+process.env.BACKFILL_BLOCKS_PER_SEC = "500"; // /backfill runs at test speed
 process.env.NODE_ENV = "production";
 process.env.SIGNATURE_DB_URL = "off";
 process.env.RECHECK_DELAYS_SEC = "3,6,9,12";
@@ -66,12 +67,31 @@ function rejectionReason(method: string, body: Record<string, unknown>): string 
   return null;
 }
 
+// sendDocument arrives as multipart/form-data: fields by name, a file as { filename, content }.
+function parseMultipart(raw: string, contentType: string): Record<string, unknown> {
+  const boundary = /boundary=([^;]+)/.exec(contentType)?.[1];
+  const out: Record<string, unknown> = {};
+  if (!boundary) return out;
+  for (const part of raw.split(`--${boundary}`)) {
+    const split = part.indexOf("\r\n\r\n");
+    if (split < 0) continue;
+    const headers = part.slice(0, split);
+    const content = part.slice(split + 4).replace(/\r\n$/, "");
+    const name = /name="([^"]+)"/.exec(headers)?.[1];
+    if (!name) continue;
+    const filename = /filename="([^"]+)"/.exec(headers)?.[1];
+    out[name] = filename ? { filename, content } : content;
+  }
+  return out;
+}
+
 const telegramApi = createServer((req, res) => {
   let raw = "";
   req.on("data", (chunk) => (raw += chunk));
   req.on("end", () => {
     const method = (req.url ?? "").split("/").pop() ?? "";
-    const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const contentType = String(req.headers["content-type"] ?? "");
+    const body = contentType.startsWith("multipart/") ? parseMultipart(raw, contentType) : raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
     const call: Call = { method, body, at: Date.now() };
     const reason = rejectionReason(method, body);
     res.setHeader("content-type", "application/json");
@@ -470,6 +490,37 @@ r = await send(ALICE, "/list");
 const listText = textsTo(r, ALICE).join("\n");
 check("/list for a token with 60+ wallets stays under Telegram's limit and is accepted", listText.length > 0 && listText.length <= 4096 && r.every((c) => !c.rejected), { len: listText.length, rejected: r.map((c) => c.rejected) });
 check("…and says how many wallets are hidden", /и ещё \d+/.test(listText), listText.slice(-300));
+
+// =====================================================================================
+section = "backfill";
+r = await send(ALICE, "/backfill anvil 10");
+check("/backfill is admin-only", has(textsTo(r, ALICE), /(лише адміністраторам|только администраторам)/), textsTo(r, ALICE));
+r = await send(ADMIN, "/backfill");
+check("/backfill without arguments explains how to use it", has(textsTo(r, ADMIN), /Usage: \/backfill <network> <range>/), textsTo(r, ADMIN));
+r = await send(ADMIN, "/backfill anvil 40d");
+check("…more than 31 days is refused with the usage", has(textsTo(r, ADMIN), /Usage: \/backfill/), textsTo(r, ADMIN));
+r = await send(ADMIN, "/backfill nosuchnet 7d");
+check("…an unknown network is named", has(textsTo(r, ADMIN), /Unknown network: nosuchnet/), textsTo(r, ADMIN));
+r = await send(ADMIN, "/backfill_stop");
+check("/backfill_stop with nothing running says so", has(textsTo(r, ADMIN), /No backfill is running/), textsTo(r, ADMIN));
+{
+  const mark = calls.length;
+  r = await send(ADMIN, "/backfill anvil 150");
+  check("/backfill anvil 150 starts in the background and says what it will scan", has(textsTo(r, ADMIN), /Backfill started: anvil, blocks \d+–\d+ \(150 blocks/), textsTo(r, ADMIN));
+  const until = Date.now() + 90_000;
+  while (!calls.slice(mark).some((c) => c.method === "sendDocument") && Date.now() < until) await new Promise((res) => setTimeout(res, 250));
+  const later = calls.slice(mark);
+  const doc = later.find((c) => c.method === "sendDocument");
+  const file = doc?.body.document as { filename?: string; content?: string } | undefined;
+  const summaryText = later.filter((c) => c.method === "sendMessage" && Number(c.body.chat_id) === ADMIN).map((c) => String(c.body.text)).find((t) => /Backfill anvil done/.test(t));
+  check(
+    "…then sends the admin a summary and the CSV of every candidate, and nothing to other chats",
+    !!summaryText && /Would alert: \d+ · no market \(OKX\): \d+/.test(summaryText) && Number(doc?.body.chat_id) === ADMIN &&
+      /^backfill-anvil-\d+-\d+\.csv$/.test(file?.filename ?? "") && (file?.content ?? "").startsWith("block,decision,contract") &&
+      later.every((c) => Number(c.body.chat_id) === ADMIN),
+    { summaryText, filename: file?.filename, head: file?.content?.slice(0, 80), others: later.filter((c) => Number(c.body.chat_id) !== ADMIN).map((c) => c.method) },
+  );
+}
 
 // =====================================================================================
 section = "hygiene";

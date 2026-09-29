@@ -4,16 +4,26 @@ import { env } from "../config/env.js";
 
 let redis: Redis | undefined;
 
+const seenKey = (k: string) => `auto:seen:${k}`;
+
 /**
- * True the first time any of `keys` is seen within AUTO_DEDUP_HOURS; false
- * if one of them was already seen (a repeat of the same token pair, or a
- * clone of already-alerted code). Marks all of them either way.
+ * Whether an alert already went out, within AUTO_DEDUP_HOURS, for one of
+ * `keys` (the same token pair, or clones of already-alerted code). Only
+ * alerts count: a clone dropped for having no market must not block a
+ * later one whose token does trade.
  */
-export async function firstSighting(keys: string[]): Promise<boolean> {
+export async function alreadyAlerted(keys: string[]): Promise<boolean> {
+  if (!(env.AUTO_DEDUP_HOURS > 0)) return false;
+  redis ??= createRedisConnection();
+  return (await redis.exists(...keys.map(seenKey))) > 0;
+}
+
+/** Records an alert for `keys`; false when another job recorded one first (this one is then the duplicate). */
+export async function markAlerted(keys: string[]): Promise<boolean> {
   const hours = env.AUTO_DEDUP_HOURS;
   if (!(hours > 0)) return true;
   redis ??= createRedisConnection();
-  const results = await Promise.all(keys.map((k) => redis!.set(`auto:seen:${k}`, "1", "EX", Math.round(hours * 3600), "NX")));
+  const results = await Promise.all(keys.map((k) => redis!.set(seenKey(k), "1", "EX", Math.round(hours * 3600), "NX")));
   return results.every((r) => r === "OK");
 }
 

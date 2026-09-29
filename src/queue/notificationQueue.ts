@@ -7,8 +7,8 @@ import { tokenRepository } from "../db/repositories/tokenRepository.js";
 import { recheckOutcome } from "../analyzer/recheck.js";
 import { env } from "../config/env.js";
 import type { TrackedContractCreationEvent, UntrackedContractCreationEvent } from "../chain/blockListener.js";
-import { analyzeAutoCandidate, sourceOf } from "../analyzer/autoAnalyzer.js";
-import { dedupKeys, firstListing, firstSighting } from "./autoDedup.js";
+import { analyzeAutoCandidate, sourceOf, type AutoAnalysisResult } from "../analyzer/autoAnalyzer.js";
+import { alreadyAlerted, dedupKeys, firstListing, markAlerted } from "./autoDedup.js";
 import { readListing, type RwaListing } from "../rwa/listings.js";
 import { checkLiquidityLevels, isOkxConfigured, type LiquidityCheck } from "../liquidity/okxLiquidity.js";
 import { noteAutoAlert, noteCandidate, noteLiquiditySkip, noteSkipped } from "../chain/autoStats.js";
@@ -286,6 +286,56 @@ function moreLiquid(alt: Record<LiquidityLevel, LiquidityCheck>, current: Record
   return a.status === "pass" && (a.impactPercent ?? Infinity) < (c.impactPercent ?? Infinity);
 }
 
+export type LiquidityDecision =
+  /** Alertable: Token A trades (or a custodian's contract, which skips the DEX test: liquidity null). */
+  | { kind: "pass"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> | null }
+  /** OKX could not answer; the worker retries before sending it unchecked. */
+  | { kind: "unchecked"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> }
+  | { kind: "drop"; reason: "liquidity" | "swap between two traded tokens"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> | null };
+
+/**
+ * The OKX part of the spec workflow for a candidate, shared by the live
+ * worker and the history backfill: which token is the old one when names
+ * didn't say, whether a bare swap(amount) is a bot, and whether Token A
+ * has an executable route.
+ */
+export async function applyLiquidityRules(
+  network: NetworkKey,
+  analyzed: AutoAnalysisResult,
+  custodianLabel: string | null,
+): Promise<LiquidityDecision> {
+  let result = analyzed;
+  if (custodianLabel) return { kind: "pass", result, liquidity: null };
+
+  let liquidity = await checkLiquidityLevels(network, result.tokenAAddress);
+  // Names didn't say which token is the old one: the one with a real
+  // market is (a brand-new token has none yet).
+  if (result.alternateTokenA) {
+    const alt = await checkLiquidityLevels(network, result.alternateTokenA);
+    if (moreLiquid(alt, liquidity)) {
+      const client = getPublicClient(network);
+      result = {
+        ...result,
+        tokenAAddress: result.alternateTokenA,
+        tokenASymbol: await readTokenSymbol(client, result.alternateTokenA),
+        tokenBAddress: result.tokenAAddress,
+        tokenBSource: sourceOf(result.tokenAGetter),
+        matchedGetter: sourceOf(result.tokenAGetter) === "static_call" ? result.tokenAGetter : null,
+      };
+      liquidity = alt;
+    }
+  }
+  // Only a bare swap(amount) got it here: a migration's Token B is new
+  // and has no market yet; two traded tokens mean a bot or a zap.
+  if (result.swapOnly && result.tokenBAddress) {
+    const target = await checkLiquidityLevels(network, result.tokenBAddress);
+    if (target.LOW_CAP.status === "pass") return { kind: "drop", reason: "swap between two traded tokens", result, liquidity };
+  }
+  if (liquidity.LOW_CAP.status === "unchecked" && isOkxConfigured()) return { kind: "unchecked", result, liquidity };
+  if (liquidity.LOW_CAP.status === "skip") return { kind: "drop", reason: "liquidity", result, liquidity };
+  return { kind: "pass", result, liquidity };
+}
+
 /**
  * Spec workflow for any new contract: migration signatures → Token A by
  * address → OKX executable-route test on Token A → alert. Contracts from a
@@ -318,48 +368,31 @@ export function startAutoDiscoveryWorker(
       let result = outcome.result;
       // The same token pair, or the same code (clones, bot fleets), alerts once per AUTO_DEDUP_HOURS.
       const keys = dedupKeys(data.network, result.tokenAAddress, result.tokenBAddress ?? result.tokenBSymbolUnverified, result.codeHash);
-      if (!(await firstSighting(keys))) {
+      if (await alreadyAlerted(keys)) {
         noteSkipped(data.network, "duplicate");
         return;
       }
       noteCandidate(data.network);
 
-      let liquidity: Record<LiquidityLevel, LiquidityCheck> | null = null;
-      if (!data.custodianLabel) {
-        liquidity = await checkLiquidityLevels(data.network, result.tokenAAddress);
-        // Names didn't say which token is the old one: the one with a real
-        // market is (a brand-new token has none yet).
-        if (result.alternateTokenA) {
-          const alt = await checkLiquidityLevels(data.network, result.alternateTokenA);
-          if (moreLiquid(alt, liquidity)) {
-            const client = getPublicClient(data.network);
-            result = {
-              ...result,
-              tokenAAddress: result.alternateTokenA,
-              tokenASymbol: await readTokenSymbol(client, result.alternateTokenA),
-              tokenBAddress: result.tokenAAddress,
-              tokenBSource: sourceOf(result.tokenAGetter),
-              matchedGetter: sourceOf(result.tokenAGetter) === "static_call" ? result.tokenAGetter : null,
-            };
-            liquidity = alt;
-          }
-        }
-        // Only a bare swap(amount) got it here: a migration's Token B is new
-        // and has no market yet; two traded tokens mean a bot or a zap.
-        if (result.swapOnly && result.tokenBAddress) {
-          const target = await checkLiquidityLevels(data.network, result.tokenBAddress);
-          if (target.LOW_CAP.status === "pass") {
-            noteSkipped(data.network, "swap between two traded tokens");
-            return;
-          }
-        }
-        const failed = liquidity.LOW_CAP.status === "unchecked" && isOkxConfigured();
-        if (failed && job.attemptsMade < 2) throw new Error(`OKX check failed, retrying: ${liquidity.LOW_CAP.reason}`);
-        if (liquidity.LOW_CAP.status === "skip") {
+      const decision = await applyLiquidityRules(data.network, result, data.custodianLabel);
+      if (decision.kind === "drop") {
+        if (decision.reason === "liquidity") {
           noteLiquiditySkip(data.network);
-          logger.debug({ data, reason: liquidity.LOW_CAP.reason }, "Auto candidate dropped by liquidity filter");
-          return;
+          logger.debug({ data, reason: decision.liquidity?.LOW_CAP.reason }, "Auto candidate dropped by liquidity filter");
+        } else {
+          noteSkipped(data.network, decision.reason);
         }
+        return;
+      }
+      if (decision.kind === "unchecked" && job.attemptsMade < 2) {
+        throw new Error(`OKX check failed, retrying: ${decision.liquidity.LOW_CAP.reason}`);
+      }
+      result = decision.result;
+      const liquidity = decision.liquidity;
+      // Only now is it an alert: the keys are taken (a concurrent twin loses).
+      if (!(await markAlerted(keys))) {
+        noteSkipped(data.network, "duplicate");
+        return;
       }
 
       const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...fields } = result;

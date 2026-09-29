@@ -30,6 +30,7 @@ const en: Dict = {
     "/language — change the bot's language\n" +
     "/status — bot health per network (admins only)\n" +
     "/custodians, /add_custodian, /remove_custodian — RWA deployer registry (admins only)\n" +
+    "/backfill <network> <range>, /backfill_stop — run past blocks through the filters, get a report (admins only)\n" +
     "/help — show this message again",
 
   "approval.pending": "🔒 Your access request has been sent to the administrator. You'll get a message here once it's approved.",
@@ -119,6 +120,23 @@ const en: Dict = {
   "listing.digestTitle": "{issuer} launched {count} new tokens",
   "listing.digestMore": "…and {count} more",
   "listing.links": "Links:",
+  "backfill.usage": "Usage: /backfill <network> <range> — e.g. /backfill ethereum 7d (days), 12h (hours) or 5000 (last blocks), up to 31 days. Runs past blocks through the bot's filters and sends you a report; nothing goes to other chats. /backfill_stop stops it.",
+  "backfill.busy": "A backfill is already running: {network}, {done}/{total} blocks. /backfill_stop stops it.",
+  "backfill.unknownNetwork": "Unknown network: {network}",
+  "backfill.rpcError": "Could not read blocks on {network} — check its RPC in /status.",
+  "backfill.started": "Backfill started: {network}, blocks {from}–{to} ({total} blocks, about {hours} h at {speed} blocks/s). Nothing is sent to chats. Progress every 25%.",
+  "backfill.progress": "Backfill {network}: {pct}% ({done}/{total} blocks) · new contracts {contracts} · candidates {candidates}",
+  "backfill.done": "Backfill {network} done: blocks {from}–{to}, scanned {scanned}, failed {failed}.",
+  "backfill.doneStopped": "Backfill {network} stopped: blocks {from}–{to}, scanned {scanned}, failed {failed}.",
+  "backfill.contracts": "New contracts: {contracts} (analysis errors: {errors})",
+  "backfill.decisions": "Would alert: {alert} · no market (OKX): {liquidity} · swap bots: {swap} · OKX didn't answer: {unchecked} · duplicates: {duplicate}",
+  "backfill.reasons": "Most common reasons contracts were dropped: {reasons}",
+  "backfill.alertsHeader": "Would have alerted:",
+  "backfill.more": "…and {count} more in the file",
+  "backfill.fileNote": "Every candidate, with its reason and liquidity, is in the CSV file below.",
+  "backfill.failed": "Backfill {network} failed: {error}",
+  "backfill.none": "No backfill is running.",
+  "backfill.stopping": "Stopping the backfill — the report for the part done follows.",
 
   "card.title": "MIGRATION CONTRACT DETECTED",
   "card.titleManual": "CONTRACT ANALYSIS",
@@ -218,6 +236,7 @@ const uk: Dict = {
     "/language — змінити мову бота\n" +
     "/status — стан бота по мережах (лише для адмінів)\n" +
     "/custodians, /add_custodian, /remove_custodian — реєстр RWA-деплоєрів (лише для адмінів)\n" +
+    "/backfill <мережа> <період>, /backfill_stop — прогнати минулі блоки через фільтри і отримати звіт (лише для адмінів)\n" +
     "/help — показати це повідомлення знову",
 
   "approval.pending": "🔒 Запит на доступ надіслано адміністратору. Ви отримаєте повідомлення тут, коли його схвалять.",
@@ -308,6 +327,23 @@ const uk: Dict = {
   "listing.digestTitle": "{issuer} випустив {count} нових токенів",
   "listing.digestMore": "…і ще {count}",
   "listing.links": "Посилання:",
+  "backfill.usage": "Використання: /backfill <мережа> <період> — напр. /backfill ethereum 7d (дні), 12h (години) або 5000 (останні блоки), до 31 дня. Проганяє минулі блоки через фільтри бота і надсилає вам звіт; в інші чати нічого не йде. /backfill_stop зупиняє.",
+  "backfill.busy": "Прогон уже йде: {network}, {done}/{total} блоків. /backfill_stop зупиняє.",
+  "backfill.unknownNetwork": "Невідома мережа: {network}",
+  "backfill.rpcError": "Не вдалося прочитати блоки {network} — перевірте RPC у /status.",
+  "backfill.started": "Прогон запущено: {network}, блоки {from}–{to} ({total} блоків, приблизно {hours} год при {speed} блоків/с). У чати нічого не надсилається. Прогрес кожні 25%.",
+  "backfill.progress": "Прогон {network}: {pct}% ({done}/{total} блоків) · нових контрактів {contracts} · кандидатів {candidates}",
+  "backfill.done": "Прогон {network} завершено: блоки {from}–{to}, перевірено {scanned}, з помилкою {failed}.",
+  "backfill.doneStopped": "Прогон {network} зупинено: блоки {from}–{to}, перевірено {scanned}, з помилкою {failed}.",
+  "backfill.contracts": "Нових контрактів: {contracts} (помилок аналізу: {errors})",
+  "backfill.decisions": "Був би алерт: {alert} · немає ринку (OKX): {liquidity} · своп-боти: {swap} · OKX не відповів: {unchecked} · повтори: {duplicate}",
+  "backfill.reasons": "Найчастіші причини відсіву: {reasons}",
+  "backfill.alertsHeader": "Бот надіслав би алерт:",
+  "backfill.more": "…і ще {count} у файлі",
+  "backfill.fileNote": "Усі кандидати з причиною та ліквідністю — у CSV-файлі нижче.",
+  "backfill.failed": "Прогон {network} завершився помилкою: {error}",
+  "backfill.none": "Прогон зараз не йде.",
+  "backfill.stopping": "Зупиняю прогон — звіт по виконаній частині надійде далі.",
 
   "card.title": "ВИЯВЛЕНО КОНТРАКТ МІГРАЦІЇ",
   "card.titleManual": "АНАЛІЗ КОНТРАКТУ",
@@ -407,6 +443,7 @@ const ru: Dict = {
     "/language — сменить язык бота\n" +
     "/status — состояние бота по сетям (только для админов)\n" +
     "/custodians, /add_custodian, /remove_custodian — реестр RWA-деплоеров (только для админов)\n" +
+    "/backfill <сеть> <период>, /backfill_stop — прогнать прошлые блоки через фильтры и получить отчёт (только для админов)\n" +
     "/help — показать это сообщение снова",
 
   "approval.pending": "🔒 Запрос на доступ отправлен администратору. Вы получите сообщение здесь, когда его одобрят.",
@@ -497,6 +534,23 @@ const ru: Dict = {
   "listing.digestTitle": "{issuer} выпустил {count} новых токенов",
   "listing.digestMore": "…и ещё {count}",
   "listing.links": "Ссылки:",
+  "backfill.usage": "Использование: /backfill <сеть> <период> — напр. /backfill ethereum 7d (дни), 12h (часы) или 5000 (последние блоки), до 31 дня. Прогоняет прошлые блоки через фильтры бота и присылает вам отчёт; в другие чаты ничего не уходит. /backfill_stop останавливает.",
+  "backfill.busy": "Прогон уже идёт: {network}, {done}/{total} блоков. /backfill_stop останавливает.",
+  "backfill.unknownNetwork": "Неизвестная сеть: {network}",
+  "backfill.rpcError": "Не удалось прочитать блоки {network} — проверьте RPC в /status.",
+  "backfill.started": "Прогон запущен: {network}, блоки {from}–{to} ({total} блоков, примерно {hours} ч при {speed} блоков/с). В чаты ничего не отправляется. Прогресс каждые 25%.",
+  "backfill.progress": "Прогон {network}: {pct}% ({done}/{total} блоков) · новых контрактов {contracts} · кандидатов {candidates}",
+  "backfill.done": "Прогон {network} завершён: блоки {from}–{to}, проверено {scanned}, с ошибкой {failed}.",
+  "backfill.doneStopped": "Прогон {network} остановлен: блоки {from}–{to}, проверено {scanned}, с ошибкой {failed}.",
+  "backfill.contracts": "Новых контрактов: {contracts} (ошибок анализа: {errors})",
+  "backfill.decisions": "Был бы алерт: {alert} · нет рынка (OKX): {liquidity} · своп-боты: {swap} · OKX не ответил: {unchecked} · повторы: {duplicate}",
+  "backfill.reasons": "Частые причины отсева: {reasons}",
+  "backfill.alertsHeader": "Бот прислал бы алерт:",
+  "backfill.more": "…и ещё {count} в файле",
+  "backfill.fileNote": "Все кандидаты с причиной и ликвидностью — в CSV-файле ниже.",
+  "backfill.failed": "Прогон {network} завершился ошибкой: {error}",
+  "backfill.none": "Прогон сейчас не идёт.",
+  "backfill.stopping": "Останавливаю прогон — отчёт по выполненной части придёт следом.",
 
   "card.title": "ОБНАРУЖЕН КОНТРАКТ МИГРАЦИИ",
   "card.titleManual": "АНАЛИЗ КОНТРАКТА",
