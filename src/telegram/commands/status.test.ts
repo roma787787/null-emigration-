@@ -126,3 +126,31 @@ test("judges health by lag: sparse and just-resumed chains are green, a stuck on
   assert.match(text, /🟢 linea · polling · block 700 · lag 0 · factory trace: on/);
   assert.match(text, /🔴 arbitrum · polling · block 50000 · lag 50000/);
 });
+
+test("RWA custodian watch lines: healthy, erroring, no custodians", () => {
+  const base = { startedAt: new Date(now - 3600_000), deployments: 0, lastError: null, lastErrorAt: null };
+  const text = formatStatus(
+    "en",
+    {
+      ...report,
+      custodians: [
+        { ...base, network: "robinhood", custodians: 1, lastBlock: 9_000_000n, lastPollAt: new Date(now - 2_000), deployments: 3 },
+        {
+          ...base,
+          network: "arbitrum",
+          custodians: 2,
+          lastBlock: 400n,
+          lastPollAt: new Date(now - 5 * 60_000),
+          lastError: "missing trie node",
+          lastErrorAt: new Date(now - 10_000),
+        },
+        { ...base, network: "base", custodians: 0, lastBlock: null, lastPollAt: new Date(now - 1_000) },
+      ],
+    },
+    now,
+  );
+  assert.match(text, /🏦 RWA custodian watch/);
+  assert.match(text, /🟢 robinhood · custodians 1 · block 9000000 · polled 2s ago · deployments 3/);
+  assert.match(text, /🔴 arbitrum · custodians 2 · block 400 · polled 5m ago · deployments 0\n    ↳ last error 10s ago: missing trie node/);
+  assert.match(text, /⚪️ base · no custodians registered/);
+});

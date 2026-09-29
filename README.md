@@ -43,10 +43,10 @@ TypeScript (Node.js) + [viem](https://viem.sh) + PostgreSQL + Redis
 ## Supported networks
 
 Built in: Ethereum, BNB Smart Chain, Arbitrum One, Base, Optimism, Polygon,
-Avalanche, Linea, Scroll, Blast, Polygon zkEVM, HyperEVM (see
+Avalanche, Linea, Scroll, Blast, Polygon zkEVM, HyperEVM, Robinhood Chain (see
 `src/config/networks.ts`). Keys for `ENABLED_NETWORKS`: `ethereum, bsc,
 arbitrum, base, optimism, polygon, avalanche, linea, scroll, blast,
-polygon-zkevm, hyperevm`.
+polygon-zkevm, hyperevm, robinhood`.
 
 ### Adding any other EVM network (no code change)
 
@@ -133,6 +133,9 @@ npm run dev                # or: npm run build && npm start
   a migration's Token A (wrapped native and major stables are built in).
 - `CUSTODIAN_DEPLOYERS` — optional seed of the RWA custodian registry,
   `network:0xaddress:Label,...`.
+- `CUSTODIAN_NETWORKS` — optional networks watched only for custodians'
+  deployments (e.g. `arbitrum,robinhood`), polled every `CUSTODIAN_POLL_MS`
+  (default `3000`); `CUSTODIAN_WATCH=false` turns the watch off.
 - `ADMIN_CHAT_IDS` — comma-separated Telegram numeric chat/user IDs (not
   `@usernames`) that are administrators. Required for anyone other than the
   admins themselves to ever use the bot — see "Access control" below.
@@ -165,13 +168,16 @@ find migrations. For every block on every enabled network:
    sender + nonce, no extra RPC call) and factory `CREATE`/`CREATE2`
    deployments. `AUTO_TRACE_MODE` picks how factories are traced:
    `calldata` (default) traces only calls whose calldata carries creation
-   code — CREATE2 deployers (CreateX, Arachnid), clone factories — a tiny
-   share of traffic; `block` traces every block with
-   `debug_traceBlockByNumber` / `trace_block` (also catches factories that
-   hold the child's code themselves, but costs one heavy call per block —
-   on Alchemy across 12 networks that ran to ~9,000 CU/s);
-   `AUTO_BLOCK_TRACE_NETWORKS=ethereum` enables `block` for chosen networks
-   only; `off` = direct deployments only.
+   code — CREATE2 deployers (CreateX, Arachnid), clone factories — and every
+   call from or into a registered custodian, a tiny share of traffic;
+   `block` traces every block with `debug_traceBlockByNumber` /
+   `trace_block` (also catches factories that hold the child's code
+   themselves). `AUTO_BLOCK_TRACE_NETWORKS` picks the networks traced per
+   block, by default `ethereum`: one block per 12s at 40 CU a trace on
+   Alchemy is cheap, while on L2s producing several blocks a second it
+   isn't (across 12 networks that ran to ~9,000 CU/s of throughput). Where
+   block tracing turns out unavailable the network falls back to
+   `calldata`. `off` = direct deployments only.
 2. **Signature gate** — kept only if the dispatcher has a `migrate*` /
    `convert*` action (not settings/flags that merely mention it —
    `setMigratedPool`, `migratedPools`, `isConverted` — nor ERC-4626's
@@ -218,15 +224,45 @@ find migrations. For every block on every enabled network:
 `issuer()` getters are recognised and shown on the card. Deployers of
 tokenized stocks (Backed Finance, Dinari, Robinhood...) can be registered as
 custodians with `/add_custodian` (or `CUSTODIAN_DEPLOYERS`), matched by the
-wallet sending the transaction or by the factory contract that ran the
-CREATE; their migration-style deployments are alerted without the DEX test,
-since tokenized stocks don't trade on DEXes at launch. Seeded once on first
-start (then the registry is the admins'): Robinhood's stock-token deployer on
-Arbitrum (`0xcBdF…f556`, Arbiscan label "Robinhood: Deployer") and Dinari's
-production `DShareFactory` on Ethereum, Arbitrum, Base and Blast (from
-`dinaricrypto/sbt-contracts` releases/v0.4.0). Backed Finance (xStocks) isn't
-seeded — its factory address couldn't be confirmed from a public source;
-add it with `/add_custodian`.
+wallet sending the transaction, the contract it calls, or the factory that ran
+the CREATE; their migration-style deployments are alerted without the DEX
+test, since tokenized stocks don't trade on DEXes at launch (a plain new stock
+token is not a migration and isn't alerted). Built in, each seeded once (then
+the registry is the admins'):
+
+| Network | Custodian | Address | Source |
+|---|---|---|---|
+| Arbitrum | Robinhood (Classic Stock Tokens) | `0xcBdF…f556` | Arbiscan label "Robinhood: Deployer" |
+| Robinhood Chain | Robinhood `StockFactory` (Stock Tokens) | `0x4783…C046` | creator of every Stock Token there |
+| Ethereum | Backed Finance (bTokens / xStocks) | `0x5F7A…a2aD` | Etherscan label "Backed: Deployer" |
+| Ethereum, Arbitrum, Base, Blast | Dinari `DShareFactory` | see `custodianRepository.ts` | `dinaricrypto/sbt-contracts` v0.4.0 |
+
+**Custodian watch.** On networks where auto-discovery reads every block,
+custodians are covered by it. Elsewhere — enabled networks without
+auto-discovery, plus `CUSTODIAN_NETWORKS` — the bot does **not** read blocks:
+every deployment bumps the deployer's nonce (a wallet's with each transaction,
+a factory contract's with each CREATE/CREATE2), so it polls the custodians'
+transaction counts every `CUSTODIAN_POLL_MS` (3s), and only when one rose
+bisects historical counts to the exact block(s) and reads those. Idle cost:
+one `eth_blockNumber` plus one `eth_getTransactionCount` per custodian per
+poll — against ~10 full blocks a second on Robinhood Chain. Deployments made
+while the bot was down are found after a restart (resumes from the saved
+block), and `/status` has a line per watched network.
+
+**Turning Robinhood on** (without full auto-discovery on those chains):
+
+```
+ENABLED_NETWORKS=ethereum
+AUTO_DISCOVERY_NETWORKS=ethereum
+CUSTODIAN_NETWORKS=arbitrum,robinhood
+RPC_ARBITRUM=https://arb-mainnet.g.alchemy.com/v2/<key>
+RPC_ROBINHOOD=https://robinhood-mainnet.g.alchemy.com/v2/<key>
+```
+
+Robinhood Chain (chain id 4663) has a public RPC (used when `RPC_ROBINHOOD`
+isn't set) but it is rate-limited; Alchemy serves it on the same key. OKX's
+DEX API and DexScreener both cover it; set `QUOTE_TOKEN_ROBINHOOD` before
+enabling full auto-discovery there (no stablecoin is built in for it yet).
 
 **Infrastructure.** Auto-discovery reads every block in full and traces it,
 so it needs WebSocket RPCs with plenty of throughput (the spec asks for
@@ -382,6 +418,17 @@ code, a migrator configured by a later `setTokens()`, a custodian recognised
 by its factory contract, and a load run — one block with 151 new contracts
 (150 spam: pools, fee tokens, plain tokens, counters) where the one migration
 must alert within 10s and no spam may.
+
+### Custodian watch test
+
+`npm run test:custodian` runs the custodian watch against anvil through a
+counting RPC proxy: idle blocks cost no block reads at all; a migration
+contract deployed by a custodian wallet, by an operator calling the
+custodian's `StockFactory` (CREATE), through a forwarder/multisig, and by a
+CREATE2 custodian factory is alerted within seconds; a new stock token is seen
+but not alerted; a non-custodian's migrator is left to auto-discovery; and 55
+deployments in 55 blocks made while the bot was stopped are all found after
+the restart, reading only those 55 blocks.
 
 ### Resilience test
 

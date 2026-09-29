@@ -283,8 +283,11 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
 
   // With auto-discovery on, one trace of the whole block yields every
   // contract created in it, factory-made ones included.
-  const traceMode = autoDiscovery && env.ENABLE_FACTORY_TRACE_DETECTION ? env.autoTraceMode(network) : "off";
-  const traced = traceMode === "block" ? await findBlockCreates(client, network, blockNumber) : null;
+  const configuredMode = autoDiscovery && env.ENABLE_FACTORY_TRACE_DETECTION ? env.autoTraceMode(network) : "off";
+  const traced = configuredMode === "block" ? await findBlockCreates(client, network, blockNumber) : null;
+  // Block tracing unavailable (or this block's trace failed): the calldata
+  // heuristic still catches deployers that receive the code.
+  const traceMode = configuredMode === "block" && traced === null ? "calldata" : configuredMode;
   const seen = new Set<string>();
 
   const dispatch = async (
@@ -350,8 +353,17 @@ async function processBlock(network: NetworkKey, blockNumber: bigint, handlers: 
       continue;
     }
     // Auto-discovery in "calldata" mode: trace only calls that ship creation
-    // code (CREATE2 deployers, clone factories) — not every block.
-    if (traceMode !== "calldata" || !handlers.untracked || !carriesInitCode(tx.input)) continue;
+    // code (CREATE2 deployers, clone factories) — not every block — and
+    // every call from or into a registered custodian (Robinhood's, Dinari's
+    // factories hold the token code themselves).
+    if (traceMode !== "calldata" || !handlers.untracked) continue;
+    if (
+      !carriesInitCode(tx.input) &&
+      !(await custodianRepository.labelFor(network, tx.from)) &&
+      !(await custodianRepository.labelFor(network, tx.to))
+    ) {
+      continue;
+    }
     try {
       const created = await findFactoryCreatedContracts(client, network, tx.hash);
       for (const c of created) await dispatch(c.address, tx.from as Address, tx.hash, c.input, "factory", c.createdBy);

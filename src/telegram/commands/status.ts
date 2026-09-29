@@ -6,6 +6,7 @@ import { getPublicClient } from "../../chain/provider.js";
 import { getListenerStatus, type ListenerStatus } from "../../chain/listenerStatus.js";
 import { blockTraceStatus, traceDetectionStatus } from "../../chain/traceCreateDetector.js";
 import { totalAutoStats, type AutoStats } from "../../chain/autoStats.js";
+import { custodianWatchStatuses, type CustodianWatchStatus } from "../../chain/custodianWatcher.js";
 import { isOkxConfigured, okxHealthSnapshot } from "../../liquidity/okxLiquidity.js";
 import { autoDiscoveryMode, type AutoMode } from "../../config/autoMode.js";
 import { statsRepository } from "../../db/repositories/statsRepository.js";
@@ -40,6 +41,7 @@ export interface StatusReport {
   queue: { waiting: number; active: number; delayed: number; failed: number };
   networks: NetworkReport[];
   auto?: { mode: AutoMode; okxConfigured: boolean; stats: AutoStats; waiting: number };
+  custodians?: CustodianWatchStatus[];
 }
 
 export function formatDuration(ms: number): string {
@@ -116,6 +118,30 @@ function autoLines(lang: Language, report: StatusReport): string[] {
   ];
 }
 
+function custodianLine(lang: Language, watch: CustodianWatchStatus, now: number): string {
+  if (watch.custodians === 0 && watch.lastPollAt !== null) {
+    return t(lang, "status.custodianNoCustodians", { network: watch.network });
+  }
+  if (watch.lastPollAt === null || watch.lastBlock === null) {
+    const line = t(lang, "status.custodianWaiting", { network: watch.network });
+    return watch.lastError ? `${line}\n    ↳ ${watch.lastError.split("\n")[0]!.slice(0, 160)}` : line;
+  }
+  const sincePoll = now - watch.lastPollAt.getTime();
+  const line = t(lang, "status.custodianLine", {
+    icon: sincePoll <= RECENT_MS ? "🟢" : "🔴",
+    network: watch.network,
+    custodians: watch.custodians,
+    block: watch.lastBlock.toString(),
+    ago: formatDuration(sincePoll),
+    deployments: watch.deployments,
+  });
+  if (!watch.lastError || !watch.lastErrorAt || watch.lastErrorAt < watch.lastPollAt) return line;
+  return `${line}\n    ↳ ${t(lang, "status.lastError", {
+    ago: formatDuration(now - watch.lastErrorAt.getTime()),
+    error: watch.lastError.split("\n")[0]!.slice(0, 160),
+  })}`;
+}
+
 export function formatStatus(lang: Language, report: StatusReport, now = Date.now()): string {
   const lines = [
     t(lang, "status.title"),
@@ -129,6 +155,10 @@ export function formatStatus(lang: Language, report: StatusReport, now = Date.no
   ];
   if (report.networks.length === 0) lines.push(t(lang, "status.none"));
   for (const network of report.networks) lines.push(networkLine(lang, network, now));
+  if (report.custodians && report.custodians.length > 0) {
+    lines.push("", t(lang, "status.custodianWatch"));
+    for (const watch of report.custodians) lines.push(custodianLine(lang, watch, now));
+  }
   return lines.join("\n");
 }
 
@@ -175,6 +205,7 @@ export async function collectStatus(): Promise<StatusReport> {
     },
     networks,
     auto: { mode: autoMode, okxConfigured, stats: totalAutoStats(), waiting: autoCounts.waiting ?? 0 },
+    custodians: custodianWatchStatuses(),
   };
 }
 

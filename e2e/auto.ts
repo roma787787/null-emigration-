@@ -500,6 +500,20 @@ check(
   `"calldata" trace mode: CREATE2 via a deployer that receives the code in calldata is found (${alerts.has(lower(childAddress)) ? ((alerts.get(lower(childAddress))!.at - calldataT0) / 1000).toFixed(1) + "s" : "never"}) — no block trace`,
   alerts.has(lower(childAddress)) && eq(alerts.get(lower(childAddress))!.record.tokenAAddress, realLend),
 );
+// A custodian's factory holds the token code itself (nothing in calldata to spot): its calls are traced anyway.
+const calldataCustodianFactory = await deploy(stranger, "MigratorFactory");
+await custodianRepository.upsert(NETWORK, calldataCustodianFactory, "Calldata Custodian");
+await new Promise((r) => setTimeout(r, 500));
+const saltC = ("0x" + "66".repeat(32)) as Hex;
+const custodianChild = (await chain.simulateContract({ account: stranger.account, address: calldataCustodianFactory, abi: factoryAbi, functionName: "deploy", args: [illiquid, newToken, saltC] })).result as Address;
+const custodianT0 = Date.now();
+await chain.waitForTransactionReceipt({ hash: await stranger.writeContract({ address: calldataCustodianFactory, abi: factoryAbi, functionName: "deploy", args: [illiquid, newToken, saltC] } as never) });
+const custodianUntil = Date.now() + 20_000;
+while (!alerts.has(lower(custodianChild)) && Date.now() < custodianUntil) await new Promise((r) => setTimeout(r, 200));
+check(
+  `"calldata" trace mode: a call into a registered custodian factory (no code in calldata) is traced (${alerts.has(lower(custodianChild)) ? ((alerts.get(lower(custodianChild))!.at - custodianT0) / 1000).toFixed(1) + "s" : "never"})`,
+  alerts.get(lower(custodianChild))?.record.custodianLabel === "Calldata Custodian",
+);
 process.env.AUTO_TRACE_MODE = "block";
 
 // --- dedup: the same migrator redeployed (same pair, same code) alerts once --------------------

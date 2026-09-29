@@ -56,12 +56,17 @@ export const env = {
    *    catches factories that hold the child's code themselves, but costs
    *    one heavy trace call per block;
    *  - "off": direct deployments only.
-   * AUTO_BLOCK_TRACE_NETWORKS forces "block" on the listed networks.
+   * AUTO_BLOCK_TRACE_NETWORKS forces "block" on the listed networks —
+   * by default Ethereum: one block per 12s makes a whole-block trace cheap
+   * (Alchemy: 40 CU a call), unlike L2s producing several blocks a second.
+   * Where block tracing turns out unavailable, "calldata" is used instead.
    */
   autoTraceMode(network: string): "calldata" | "block" | "off" {
-    if (parseList(process.env.AUTO_BLOCK_TRACE_NETWORKS).map((k) => k.toLowerCase()).includes(network)) return "block";
     const mode = (process.env.AUTO_TRACE_MODE ?? "calldata").toLowerCase();
-    return mode === "block" || mode === "off" ? mode : "calldata";
+    if (mode === "off") return "off";
+    const blockNetworks = parseList(process.env.AUTO_BLOCK_TRACE_NETWORKS ?? "ethereum").map((k) => k.toLowerCase());
+    if (blockNetworks.includes(network)) return "block";
+    return mode === "block" ? "block" : "calldata";
   },
 
   get AUTO_DEDUP_HOURS(): number {
@@ -71,6 +76,20 @@ export const env = {
   /** Networks auto-discovery runs on (it reads and traces every block — the costly part); empty = every enabled network. */
   autoDiscoveryNetworks(): string[] {
     return parseList(process.env.AUTO_DISCOVERY_NETWORKS).map((k) => k.toLowerCase());
+  },
+  /**
+   * Networks watched only for deployments by registered RWA custodians
+   * (Robinhood, Dinari, Backed…), in addition to ENABLED_NETWORKS: no block
+   * feed, just their transaction counts polled every CUSTODIAN_POLL_MS — a
+   * few RPC calls, where reading every block of a fast chain costs thousands.
+   * Enabled networks without auto-discovery get the same watch.
+   */
+  custodianNetworks(): string[] {
+    return parseList(process.env.CUSTODIAN_NETWORKS).map((k) => k.toLowerCase());
+  },
+  CUSTODIAN_WATCH: process.env.CUSTODIAN_WATCH !== "false",
+  get CUSTODIAN_POLL_MS(): number {
+    return Number(process.env.CUSTODIAN_POLL_MS ?? 3000);
   },
   LOG_LEVEL: process.env.LOG_LEVEL ?? "info",
   // Etherscan's unified multichain API (v2) — one key, `chainid` selects the

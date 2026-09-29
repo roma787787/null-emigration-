@@ -85,3 +85,11 @@ test("rejects an explorer URL without a scheme", () => {
 test("no EXTRA_NETWORKS means no custom networks", () => {
   assert.deepEqual(parseCustomNetworks({}, BUILTINS), { specs: {}, errors: [] });
 });
+
+test("Robinhood Chain is built in (chain 4663, Blockscout, DexScreener slug)", async () => {
+  const { getNetwork } = await import("./networks.js");
+  const rh = getNetwork("robinhood");
+  assert.equal(rh.chain.id, 4663);
+  assert.equal(rh.explorerAddressUrl("0xabc"), "https://robinhoodchain.blockscout.com/address/0xabc");
+  assert.equal(rh.dexscreenerTokenUrl("0xabc"), "https://dexscreener.com/robinhood/0xabc");
+});

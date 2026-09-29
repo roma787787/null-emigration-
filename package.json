@@ -17,7 +17,8 @@
     "test:e2e": "tsx e2e/run.ts",
     "test:bot": "tsx e2e/bot.ts",
     "test:resilience": "tsx e2e/resilience.ts",
-    "test:auto": "tsx e2e/auto.ts"
+    "test:auto": "tsx e2e/auto.ts",
+    "test:custodian": "tsx e2e/custodian.ts"
   },
   "dependencies": {
     "bullmq": "^5.12.0",

@@ -11,6 +11,7 @@ import {
   optimism,
   polygon,
   polygonZkEvm,
+  robinhood,
   scroll,
 } from "viem/chains";
 import type { NetworkKey } from "../types/index.js";
@@ -122,6 +123,15 @@ const BUILTIN_SPECS: Record<string, NetworkSpec> = {
     explorerBaseUrl: "https://hyperevmscan.io",
     dexscreenerSlug: "hyperevm",
     defaultRpcUrls: ["https://rpc.hyperliquid.xyz/evm"],
+  },
+  // Robinhood's own Arbitrum Orbit L2 (mainnet since July 2026), home of its
+  // Stock Tokens. ~10 blocks/s: best watched for custodians only (CUSTODIAN_NETWORKS).
+  robinhood: {
+    label: "Robinhood Chain",
+    chain: robinhood,
+    explorerBaseUrl: "https://robinhoodchain.blockscout.com",
+    dexscreenerSlug: "robinhood",
+    defaultRpcUrls: ["https://rpc.mainnet.chain.robinhood.com"],
   },
 };
 

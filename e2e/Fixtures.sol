@@ -384,3 +384,19 @@ contract MemePoolToken {
     function setMigratedPool(address p, bool v) external { migratedPools[p] = v; }
     function setMigratedPools(address[] calldata ps, bool v) external { for (uint256 i; i < ps.length; i++) migratedPools[ps[i]] = v; }
 }
+
+/// Robinhood StockFactory shape: an operator calls it, it CREATEs (no salt) —
+/// mostly stock tokens, occasionally a migration contract.
+contract StockFactoryLike {
+    function deployMigrator(address a, address b) external returns (address m) { m = address(new MigratorWithGetters(a, b)); }
+    function deployStock(string memory n, string memory s) external returns (address t) { t = address(new SimpleToken(n, s, 1e24)); }
+}
+
+/// A multisig / relayer between the operator and a custodian factory: the tx
+/// goes to it, not to the factory.
+contract Forwarder {
+    function forward(address to, bytes calldata data) external {
+        (bool ok, ) = to.call(data);
+        require(ok, "forward failed");
+    }
+}

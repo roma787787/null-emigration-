@@ -1,7 +1,8 @@
 import { assertTelegramConfigured } from "./config/env.js";
-import { enabledNetworks, networkConfigErrors, unknownEnabledNetworks } from "./config/networks.js";
+import { enabledNetworks, isKnownNetwork, networkConfigErrors, unknownEnabledNetworks } from "./config/networks.js";
 import { runMigrations } from "./db/migrate.js";
-import { startBlockListener } from "./chain/blockListener.js";
+import { startBlockListener, type UntrackedCreationHandler } from "./chain/blockListener.js";
+import { startCustodianWatcher } from "./chain/custodianWatcher.js";
 import {
   enqueueAutoCandidate,
   enqueueContractCreation,
@@ -26,11 +27,19 @@ async function main() {
     await broadcastMigrationAlert(bot, analyzed);
   });
   const autoOn = autoDiscoveryMode() === "on";
-  const autoWorker = autoOn
-    ? startAutoDiscoveryWorker(async (analyzed) => {
-        await broadcastMigrationAlert(bot, analyzed);
-      })
-    : null;
+  const autoCovers = (network: string) =>
+    autoOn && (env.autoDiscoveryNetworks().length === 0 || env.autoDiscoveryNetworks().includes(network));
+  // RWA custodians are watched wherever auto-discovery doesn't already read
+  // every block: enabled networks without it, plus CUSTODIAN_NETWORKS.
+  const custodianNetworks = env.CUSTODIAN_WATCH
+    ? [...new Set([...enabledNetworks(), ...env.custodianNetworks().filter(isKnownNetwork)])].filter((n) => !autoCovers(n))
+    : [];
+  const autoWorker =
+    autoOn || custodianNetworks.length > 0
+      ? startAutoDiscoveryWorker(async (analyzed) => {
+          await broadcastMigrationAlert(bot, analyzed);
+        })
+      : null;
   if (autoDiscoveryMode() === "paused-no-okx") {
     logger.warn(
       "Auto-discovery paused: OKX_API_KEY/OKX_SECRET_KEY/OKX_API_PASSPHRASE are not set, so no auto alert could pass the liquidity filter — not spending RPC on it",
@@ -52,6 +61,19 @@ async function main() {
     logger.warn({ unknown }, "ENABLED_NETWORKS lists networks that don't exist — typo?");
   }
 
+  const unknownCustodianNetworks = env.custodianNetworks().filter((k) => !isKnownNetwork(k));
+  if (unknownCustodianNetworks.length > 0) {
+    logger.warn({ unknown: unknownCustodianNetworks }, "CUSTODIAN_NETWORKS lists networks that don't exist — typo?");
+  }
+
+  const enqueueAuto =
+    (network: string): UntrackedCreationHandler =>
+    async (event) => {
+      await enqueueAutoCandidate(event).catch((err) => {
+        logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue auto-discovery job");
+      });
+    };
+
   // One network failing to start (bad RPC URL, etc.) must not stop the others.
   const started: string[] = [];
   const stopListeners: Array<() => Promise<void>> = [];
@@ -65,18 +87,19 @@ async function main() {
               logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue analysis job");
             });
           },
-          autoOn && (env.autoDiscoveryNetworks().length === 0 || env.autoDiscoveryNetworks().includes(network))
-            ? async (event) => {
-                await enqueueAutoCandidate(event).catch((err) => {
-                  logger.error({ err, network, contractAddress: event.contractAddress }, "Failed to enqueue auto-discovery job");
-                });
-              }
-            : undefined,
+          autoCovers(network) ? enqueueAuto(network) : undefined,
         ),
       );
       started.push(network);
     } catch (err) {
       logger.error({ err, network }, "Failed to start block listener for network");
+    }
+  }
+  for (const network of custodianNetworks) {
+    try {
+      stopListeners.push(startCustodianWatcher(network, enqueueAuto(network)));
+    } catch (err) {
+      logger.error({ err, network }, "Failed to start custodian watch for network");
     }
   }
 
@@ -106,7 +129,7 @@ async function main() {
   // never run while the bot is up — hence the onLaunch callback and the
   // signal handlers being registered first.
   await launchWithConflictRetry(bot, () => {
-    logger.info({ networks: started }, "Multi-EVM migration tracker started");
+    logger.info({ networks: started, custodianWatch: custodianNetworks }, "Multi-EVM migration tracker started");
   });
 }
 
