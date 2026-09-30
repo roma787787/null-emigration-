@@ -330,6 +330,19 @@ cases.push({
   address: await deployTimed(stranger, "HardcodedMigrator", [registry]),
   expect: expectAlert((r) => (!eq(r.tokenAAddress, oldTwin) || !eq(r.tokenBAddress, newToken2) || r.tokenBSource !== "bytecode" ? `A ${r.tokenAAddress} B ${r.tokenBAddress} via ${r.tokenBSource}` : null)),
 });
+// Both tokens hard-coded (no names) and BOTH trade, the new one deeper — Telcoin's
+// TEL → TEL v3 on Base, where the new token was listed before the migration opened.
+// The market can't tell old from new; the one deployed first is the old one.
+const telOld = await token("Telcoin", "TEL");
+const telNew = await token("Telcoin", "TEL");
+markets.set(lower(telOld), { low: 0.55, strict: 0.87, deep: 4.7 });
+markets.set(lower(telNew), { low: 0.1, strict: 0.3, deep: 1.2 });
+const telRegistry = await deploy(stranger, "TokenRegistry", [telNew, telOld]);
+cases.push({
+  label: "hard-coded tokens that both trade, the new one deeper (TEL → TEL v3) → Token A is the one deployed first",
+  address: await deployTimed(stranger, "HardcodedMigrator", [telRegistry]),
+  expect: expectAlert((r) => (!eq(r.tokenAAddress, telOld) || !eq(r.tokenBAddress, telNew) ? `A ${r.tokenAAddress} B ${r.tokenBAddress}` : null)),
+});
 // Deployed empty, tokens set by a later tx: re-check picks it up.
 const late = await deployTimed(stranger, "LateConfiguredMigrator");
 await chain.waitForTransactionReceipt({

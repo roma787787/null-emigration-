@@ -15,6 +15,8 @@ import { noteAutoAlert, noteCandidate, noteLiquiditySkip, noteSkipped } from "..
 import { getPublicClient } from "../chain/provider.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
+import { findDeployBlock } from "../chain/creationLookup.js";
+import { isAddressEqual, type Address } from "viem";
 
 const QUEUE_NAME = "contract-creation-events";
 
@@ -286,6 +288,33 @@ function moreLiquid(alt: Record<LiquidityLevel, LiquidityCheck>, current: Record
   return a.status === "pass" && (a.impactPercent ?? Infinity) < (c.impactPercent ?? Infinity);
 }
 
+// When a token was deployed never changes: cached per network + address.
+const deployBlocks = new Map<string, bigint | null>();
+
+async function deployBlockOf(network: NetworkKey, token: Address, head: bigint): Promise<bigint | null> {
+  const key = `${network}:${token.toLowerCase()}`;
+  if (!deployBlocks.has(key)) deployBlocks.set(key, await findDeployBlock(getPublicClient(network), token, head));
+  return deployBlocks.get(key)!;
+}
+
+/**
+ * Of two tokens, the one deployed first — the old one of a migration, even
+ * when the new one already trades deeper (a project listing its new token
+ * before the migration opens: Telcoin's TEL v3 on Base). Null when it can't
+ * be told (same block, or an RPC without history).
+ */
+export async function olderToken(network: NetworkKey, a: Address, b: Address): Promise<Address | null> {
+  try {
+    const head = await getPublicClient(network).getBlockNumber();
+    const [blockA, blockB] = await Promise.all([deployBlockOf(network, a, head), deployBlockOf(network, b, head)]);
+    if (blockA === null || blockB === null || blockA === blockB) return null;
+    return blockA < blockB ? a : b;
+  } catch (err) {
+    logger.warn({ err, network, a, b }, "Could not tell which token is older");
+    return null;
+  }
+}
+
 export type LiquidityDecision =
   /** Alertable: Token A trades (or a custodian's contract, which skips the DEX test: liquidity null). */
   | { kind: "pass"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> | null }
@@ -333,10 +362,14 @@ export async function applyLiquidityRules(
 
   let liquidity = await checkLiquidityLevels(network, result.tokenAAddress);
   // Names didn't say which token is the old one: the one with a real
-  // market is (a brand-new token has none yet).
+  // market is (a brand-new token has none yet). When both trade, the one
+  // deployed first is — the new one may already trade deeper.
   if (result.alternateTokenA) {
-    const alt = await checkLiquidityLevels(network, result.alternateTokenA);
-    if (moreLiquid(alt, liquidity)) {
+    const alternate = result.alternateTokenA;
+    const alt = await checkLiquidityLevels(network, alternate);
+    const bothTrade = alt.LOW_CAP.status === "pass" && liquidity.LOW_CAP.status === "pass";
+    const older = bothTrade ? await olderToken(network, result.tokenAAddress, alternate) : null;
+    if (older ? isAddressEqual(older, alternate) : moreLiquid(alt, liquidity)) {
       const client = getPublicClient(network);
       result = {
         ...result,

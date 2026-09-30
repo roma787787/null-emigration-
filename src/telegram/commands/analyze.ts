@@ -12,7 +12,7 @@ import { formatMigrationAlert } from "../notificationFormatter.js";
 import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 import { analyzeAutoCandidate } from "../../analyzer/autoAnalyzer.js";
-import { checkLiquidityLevels } from "../../liquidity/okxLiquidity.js";
+import { applyLiquidityRules, type LiquidityDecision } from "../../queue/notificationQueue.js";
 import { findDeployTx } from "../../chain/creationLookup.js";
 
 function isTxHash(value: string): value is Hex {
@@ -139,17 +139,14 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
         // What auto-discovery makes of it. With no Token A given or tracked,
         // the card reads Token A from the contract the same way and runs the
         // same liquidity test.
+        // The same steps as live, the liquidity rules (which token is the old
+        // one, dollar converters, swap bots) included.
         const auto = await analyzeAutoCandidate(network, contractAddress, input).catch(() => null);
-        if (!tokenA) {
-          if (auto?.kind === "candidate") {
-            const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...autoFields } = auto.result;
-            record = {
-              ...record,
-              ...autoFields,
-              discovery: "auto",
-              liquidity: await checkLiquidityLevels(network, auto.result.tokenAAddress),
-            };
-          }
+        let verdict: LiquidityDecision | null = null;
+        if (auto?.kind === "candidate") verdict = await applyLiquidityRules(network, auto.result, null).catch(() => null);
+        if (!tokenA && verdict) {
+          const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...autoFields } = verdict.result;
+          record = { ...record, ...autoFields, discovery: "auto", liquidity: verdict.liquidity };
         }
         await ctx.reply(formatMigrationAlert(tokenA, record, lang, { manual: true }), {
           parse_mode: "MarkdownV2",
@@ -159,9 +156,13 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
         await ctx.reply(
           !auto
             ? t(lang, "analyze.autoFailed", { block })
-            : auto.kind === "candidate"
-              ? t(lang, "analyze.autoCandidate", { block })
-              : t(lang, "analyze.autoSkipped", { reason: auto.reason, block }),
+            : auto.kind === "skipped"
+              ? t(lang, "analyze.autoSkipped", { reason: auto.reason, block })
+              : verdict?.kind === "pass"
+                ? t(lang, "analyze.autoAlert", { block })
+                : verdict?.kind === "drop"
+                  ? t(lang, "analyze.autoSkipped", { reason: verdict.reason, block })
+                  : t(lang, "analyze.autoCandidate", { block }),
         );
       }
     } catch (err) {

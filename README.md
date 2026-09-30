@@ -210,7 +210,9 @@ find migrations. For every block on every enabled network:
    its code (constants and `immutable`s, e.g. Aave's `LEND`/`AAVE`). Old vs new is
    decided from names (`oldToken`/`newToken`, `migrateFromLEND` → `LEND()`,
    `mkrToSky` → `mkr()`/`sky()`); a token with `migrate()` is itself Token B;
-   when names don't tell, the token with a market is Token A. Wrapped native
+   when names don't tell, the token with a market is Token A — and when both
+   trade (a new token listed before its migration opens, like Telcoin's TEL v3
+   on Base), the one deployed first (found by bisecting `eth_getCode`). Wrapped native
    and stablecoins are never Token A, nor are wrappers of them (Aave's
    aWETH, Compound's cUSDC, vault shares — via `UNDERLYING_ASSET_ADDRESS()`,
    `underlying()`, `asset()`). Symbols are only displayed — never
@@ -343,8 +345,9 @@ run cancels it.
 `/analyze` runs the same analyzer on the contract(s) an already-mined
 transaction created — a direct deploy or a factory call — and replies with
 the alert card (titled "Contract analysis"; nothing is stored or
-broadcast), followed by what auto-discovery would do with it — pass its
-filters, or the reason it would be dropped — and the block it was deployed
+broadcast), followed by what auto-discovery would do with it — alert, or the
+reason it would be dropped (the same filters and liquidity rules as live,
+old-vs-new token included) — and the block it was deployed
 in (to tell "deployed before the backfill window" from "missed"). The
 contract's address is enough: the bot finds the deploying transaction through
 the Etherscan API (`ETHERSCAN_API_KEY`) or, where that doesn't answer (free

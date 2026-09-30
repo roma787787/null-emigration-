@@ -405,7 +405,7 @@ check(
   has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}[\\s\\S]*Ліквідність`, "i")),
   textsTo(r, ALICE),
 );
-const autoLine = (text: string) => text.includes("Автопошук: контракт проходить фільтри");
+const autoLine = (text: string) => text.includes("Автопошук: контракт проходить фільтри") || text.includes("Автопошук надіслав би алерт");
 check(
   "/analyze says what auto-discovery would do with the contract and the block it was deployed in",
   textsTo(r, ALICE).some((m) => autoLine(m) && m.includes(`блоці ${byStranger.blockNumber}`)),
