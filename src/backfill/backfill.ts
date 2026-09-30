@@ -1,7 +1,7 @@
 import type { NetworkKey } from "../types/index.js";
 import { getPublicClient } from "../chain/provider.js";
 import { collectBlockCreations, type UntrackedContractCreationEvent } from "../chain/blockListener.js";
-import { analyzeAutoCandidate } from "../analyzer/autoAnalyzer.js";
+import { analyzeAutoCandidate, type AutoAnalysisResult } from "../analyzer/autoAnalyzer.js";
 import { applyLiquidityRules } from "../queue/notificationQueue.js";
 import { dedupKeys } from "../queue/autoDedup.js";
 import { getNetwork } from "../config/networks.js";
@@ -63,7 +63,9 @@ export interface BackfillOptions {
   toBlock: bigint;
   /** Pace, so the live bot keeps its RPC share (block traces are the heavy calls). */
   blocksPerSec?: number;
-  /** Contracts of one block analyzed at once. */
+  /** Blocks fetched at once (the pace above still caps the average rate). */
+  parallelBlocks?: number;
+  /** Contracts analyzed at once. */
   concurrency?: number;
   signal?: AbortSignal;
   onProgress?: (progress: BackfillProgress) => void | Promise<void>;
@@ -101,10 +103,25 @@ export async function blockAtTime(network: NetworkKey, timestampSec: number): Pr
   return lo;
 }
 
+/** Runs `fn` over `items`, at most `limit` at a time; results keep the input order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function runBackfill(options: BackfillOptions): Promise<BackfillReport> {
   const { network, fromBlock, toBlock, signal } = options;
-  const blocksPerSec = options.blocksPerSec ?? 3;
-  const concurrency = options.concurrency ?? 4;
+  const blocksPerSec = options.blocksPerSec ?? 10;
+  const parallelBlocks = Math.max(1, Math.floor(options.parallelBlocks ?? 8));
+  const concurrency = options.concurrency ?? 8;
   const step = options.progressStep ?? 0.25;
   const report: BackfillReport = {
     network,
@@ -125,11 +142,9 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRep
   const skip = (reason: string) => (report.skipped[reason] = (report.skipped[reason] ?? 0) + 1);
   let nextReport = step;
 
-  const analyze = async (event: UntrackedContractCreationEvent) => {
-    const outcome = await analyzeAutoCandidate(network, event.contractAddress, event.input);
-    if (outcome.kind === "skipped") return skip(outcome.reason);
-
-    const found = outcome.result;
+  // Decided one at a time, in block order: whether a candidate is a duplicate
+  // depends on what was alerted before it.
+  const decide = async (event: UntrackedContractCreationEvent, found: AutoAnalysisResult) => {
     // As live: a duplicate is a repeat of something already ALERTED (same pair or same code).
     const keys = dedupKeys(network, found.tokenAAddress, found.tokenBAddress ?? found.tokenBSymbolUnverified, found.codeHash);
     const duplicateOf = keys.map((k) => seenKeys.get(k)).find((a) => a !== undefined) ?? null;
@@ -170,38 +185,57 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRep
   };
 
   const started = Date.now();
-  for (let block = fromBlock; block <= toBlock; block++) {
+  for (let first = fromBlock; first <= toBlock; first += BigInt(parallelBlocks)) {
     if (signal?.aborted) {
       report.stopped = true;
       break;
     }
     // Pace: block k is not started before k / blocksPerSec seconds in.
-    const due = started + (Number(block - fromBlock) * 1000) / blocksPerSec;
+    const due = started + (Number(first - fromBlock) * 1000) / blocksPerSec;
     if (due > Date.now()) await new Promise((r) => setTimeout(r, due - Date.now()));
 
-    let creations: UntrackedContractCreationEvent[];
-    try {
-      creations = await withRetry(() => collectBlockCreations(network, block));
-    } catch (err) {
-      report.blocksFailed++;
-      logger.warn({ err, network, block: block.toString() }, "Backfill: block failed after retries");
-      report.blocksScanned++;
-      continue;
+    const blocks: bigint[] = [];
+    for (let b = first; b <= toBlock && blocks.length < parallelBlocks; b++) blocks.push(b);
+
+    // 1. The window's blocks, fetched at once.
+    const fetched = await Promise.all(
+      blocks.map((block) =>
+        withRetry(() => collectBlockCreations(network, block)).catch((err) => {
+          report.blocksFailed++;
+          logger.warn({ err, network, block: block.toString() }, "Backfill: block failed after retries");
+          return [] as UntrackedContractCreationEvent[];
+        }),
+      ),
+    );
+    const events = fetched.flat();
+    report.contracts += events.length;
+
+    // 2. Every new contract of the window analyzed in parallel.
+    const outcomes = await mapLimit(events, concurrency, (event) =>
+      analyzeAutoCandidate(network, event.contractAddress, event.input).catch((err) => {
+        report.analysisErrors++;
+        logger.warn({ err, network, contractAddress: event.contractAddress }, "Backfill: analysis failed");
+        return null;
+      }),
+    );
+
+    // 3. Candidates decided in block order.
+    for (let i = 0; i < events.length; i++) {
+      const outcome = outcomes[i];
+      if (!outcome) continue;
+      if (outcome.kind === "skipped") {
+        skip(outcome.reason);
+        continue;
+      }
+      await decide(events[i]!, outcome.result).catch((err) => {
+        report.analysisErrors++;
+        logger.warn({ err, network, contractAddress: events[i]!.contractAddress }, "Backfill: liquidity check failed");
+      });
     }
-    report.contracts += creations.length;
-    for (let i = 0; i < creations.length; i += concurrency) {
-      await Promise.all(
-        creations.slice(i, i + concurrency).map((event) =>
-          analyze(event).catch((err) => {
-            report.analysisErrors++;
-            logger.warn({ err, network, contractAddress: event.contractAddress }, "Backfill: analysis failed");
-          }),
-        ),
-      );
-    }
-    report.blocksScanned++;
+
+    report.blocksScanned += blocks.length;
     if (options.onProgress && report.blocksScanned / total >= nextReport && report.blocksScanned < total) {
-      nextReport += step;
+      while (report.blocksScanned / total >= nextReport) nextReport += step;
       await options.onProgress({ done: report.blocksScanned, total, report });
     }
   }

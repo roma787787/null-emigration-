@@ -27,7 +27,12 @@ let running: { network: NetworkKey; controller: AbortController; done: number; t
 
 function blocksPerSec(): number {
   const value = Number(process.env.BACKFILL_BLOCKS_PER_SEC);
-  return Number.isFinite(value) && value > 0 ? value : 3;
+  return Number.isFinite(value) && value > 0 ? value : 10;
+}
+
+function parallelBlocks(): number {
+  const value = Number(process.env.BACKFILL_PARALLEL_BLOCKS);
+  return Number.isFinite(value) && value >= 1 ? Math.min(Math.floor(value), 50) : 8;
 }
 
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -127,6 +132,7 @@ export function registerBackfillCommands(bot: Telegraf): void {
       fromBlock,
       toBlock,
       blocksPerSec: speed,
+      parallelBlocks: parallelBlocks(),
       signal: controller.signal,
       onProgress: async ({ done, report }) => {
         if (running) running.done = done;

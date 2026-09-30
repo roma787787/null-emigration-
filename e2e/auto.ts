@@ -608,7 +608,7 @@ check(
   const total = Number(toBlock - scanFrom + 1n);
   const t0 = Date.now();
   let progressCalls = 0;
-  const report = await runBackfill({ network: NETWORK, fromBlock: scanFrom, toBlock, blocksPerSec: 1000, concurrency: 8, onProgress: () => void progressCalls++ });
+  const report = await runBackfill({ network: NETWORK, fromBlock: scanFrom, toBlock, blocksPerSec: 1000, parallelBlocks: 16, concurrency: 8, onProgress: () => void progressCalls++ });
   const byAddress = new Map(report.candidates.map((c) => [lower(c.contractAddress), c]));
   const counts = decisionCounts(report);
   check(
@@ -631,6 +631,13 @@ check(
     "backfill sends nothing and leaves the live /status counters alone",
     alerts.size === alertsBefore && JSON.stringify(autoStats(NETWORK)) === statsBefore,
     { alerts: alerts.size - alertsBefore },
+  );
+  const serial = await runBackfill({ network: NETWORK, fromBlock: scanFrom, toBlock, blocksPerSec: 1000, parallelBlocks: 1, concurrency: 1 });
+  const decisions = (r: typeof report) => r.candidates.map((c) => `${c.blockNumber}:${lower(c.contractAddress)}:${c.decision}:${c.duplicateOf ?? ""}`).join("\n");
+  check(
+    "backfill 16 blocks at a time decides exactly as one block at a time (same candidates, order, duplicates)",
+    decisions(serial) === decisions(report) && JSON.stringify(serial.skipped) === JSON.stringify(report.skipped),
+    { serial: decisionCounts(serial), parallel: counts },
   );
   const csv = backfillCsv(report);
   const summary = formatBackfillSummary("ru", report);

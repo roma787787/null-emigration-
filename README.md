@@ -328,8 +328,12 @@ contracts) and the analysis queue, including scheduled re-checks.
 `/backfill ethereum 7d` (also `12h`, or `5000` for the last 5,000 blocks; up
 to 31 days) runs past blocks through exactly the live pipeline — contract
 discovery, analysis, filters, dedup, the OKX test — in the background, at
-`BACKFILL_BLOCKS_PER_SEC` (default 3, so the live bot keeps its RPC share;
-a week of Ethereum is ~50,400 blocks, ~4.7 h, roughly 5M Alchemy CU).
+most `BACKFILL_BLOCKS_PER_SEC` (default 10, so the live bot keeps its RPC
+share), fetching `BACKFILL_PARALLEL_BLOCKS` blocks at once (default 8, max
+50) — one block at a time, RPC latency alone would hold it to a few blocks
+a second. A week of Ethereum is ~50,400 blocks (~1.4 h at 10/s, roughly 5M
+Alchemy CU); a day of BSC ~115,000 blocks (~3.2 h at 10/s, ~1.6 h at 20/s).
+If the RPC starts answering 429, lower the pace.
 Nothing is sent to chats, stored as a detection or counted in `/status`; the
 admin gets progress every 25%, then a summary (would-be alerts, drops by
 reason) and a CSV of every candidate with its decision and liquidity per
