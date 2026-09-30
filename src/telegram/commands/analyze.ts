@@ -13,6 +13,7 @@ import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 import { analyzeAutoCandidate } from "../../analyzer/autoAnalyzer.js";
 import { checkLiquidityLevels } from "../../liquidity/okxLiquidity.js";
+import { getContractCreation } from "../../chain/ownerDiscovery.js";
 
 function isTxHash(value: string): value is Hex {
   return isHex(value) && value.length === 66;
@@ -38,10 +39,13 @@ async function tokenACandidates(network: NetworkKey, explicit: Address | null, c
 }
 
 /**
- * /analyze <network> <deploy_tx_hash> [token_a_address] — runs the migration
- * analyzer on contracts created by an already-mined transaction and replies
- * with the same card a live detection would produce. Nothing is stored or
- * broadcast; it's for checking real-world contracts on demand.
+ * /analyze <network> <deploy_tx_hash | contract_address> [token_a_address] —
+ * runs the migration analyzer on contracts created by an already-mined
+ * transaction (found through the explorer API when given the contract's
+ * address) and replies with the same card a live detection would produce,
+ * plus what auto-discovery would have done with it and in which block.
+ * Nothing is stored or broadcast; it's for checking real-world contracts on
+ * demand.
  */
 export function registerAnalyzeCommand(bot: Telegraf): void {
   bot.command("analyze", async (ctx) => {
@@ -61,7 +65,7 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
       await ctx.reply(t(lang, "addToken.unknownNetwork", { network: networkArg, networks: networksList }));
       return;
     }
-    if (!isTxHash(hashArg)) {
+    if (!isTxHash(hashArg) && !isAddress(hashArg)) {
       await ctx.reply(t(lang, "analyze.invalidHash", { hash: hashArg }));
       return;
     }
@@ -71,17 +75,35 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
     }
 
     const explicitTokenA = tokenArg ? getAddress(tokenArg) : null;
-    await ctx.reply(t(lang, "analyze.working", { hash: hashArg, network }));
+
+    // Given the contract's address: find the transaction that deployed it.
+    let hash: Hex;
+    let onlyContract: Address | null = null;
+    if (isTxHash(hashArg)) {
+      hash = hashArg;
+    } else {
+      onlyContract = getAddress(hashArg);
+      const creation = await getContractCreation(network, onlyContract).catch((err) => {
+        logger.warn({ err, network, contract: onlyContract }, "/analyze: creation lookup failed");
+        return null;
+      });
+      if (!creation) {
+        await ctx.reply(t(lang, "analyze.creationUnknown", { address: onlyContract, network }));
+        return;
+      }
+      hash = creation.txHash;
+    }
+    await ctx.reply(t(lang, "analyze.working", { hash, network }));
 
     try {
       let candidates: TokenRecord[] = [];
-      const result = await analyzeDeployTx(network, hashArg, async (creator) => {
+      const result = await analyzeDeployTx(network, hash, async (creator) => {
         candidates = await tokenACandidates(network, explicitTokenA, creator);
         return candidates.map((c) => c.address);
       });
 
       if (result.status === "not_found") {
-        await ctx.reply(t(lang, "analyze.notFound", { hash: hashArg, network }));
+        await ctx.reply(t(lang, "analyze.notFound", { hash, network }));
         return;
       }
       if (result.status === "reverted") {
@@ -93,7 +115,10 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
         return;
       }
 
-      for (const { contractAddress, input, analysis } of result.deployments) {
+      const deployments = onlyContract
+        ? result.deployments.filter((d) => d.contractAddress.toLowerCase() === onlyContract.toLowerCase())
+        : result.deployments;
+      for (const { contractAddress, input, analysis } of deployments.length > 0 ? deployments : result.deployments) {
         const { tokenAAddress, ...fields } = analysis;
         const tokenA =
           candidates.find((c) => tokenAAddress && c.address.toLowerCase() === tokenAAddress.toLowerCase()) ?? null;
@@ -109,14 +134,15 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
           contractAddress,
           creatorAddress: result.creator,
           ...fields,
-          txHash: hashArg,
+          txHash: hash,
           blockNumber: result.blockNumber,
           detectedAt: new Date(),
         };
-        // No Token A given or tracked: read it from the contract the way
-        // auto-discovery does, and run the same liquidity test.
+        // What auto-discovery makes of it. With no Token A given or tracked,
+        // the card reads Token A from the contract the same way and runs the
+        // same liquidity test.
+        const auto = await analyzeAutoCandidate(network, contractAddress, input).catch(() => null);
         if (!tokenA) {
-          const auto = await analyzeAutoCandidate(network, contractAddress, input).catch(() => null);
           if (auto?.kind === "candidate") {
             const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...autoFields } = auto.result;
             record = {
@@ -131,9 +157,17 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
           parse_mode: "MarkdownV2",
           link_preview_options: { is_disabled: true },
         });
+        const block = result.blockNumber.toString();
+        await ctx.reply(
+          !auto
+            ? t(lang, "analyze.autoFailed", { block })
+            : auto.kind === "candidate"
+              ? t(lang, "analyze.autoCandidate", { block })
+              : t(lang, "analyze.autoSkipped", { reason: auto.reason, block }),
+        );
       }
     } catch (err) {
-      logger.error({ err, network, hash: hashArg }, "/analyze failed");
+      logger.error({ err, network, hash }, "/analyze failed");
       const message = err instanceof BaseError ? err.shortMessage : err instanceof Error ? err.message : String(err);
       await ctx.reply(t(lang, "analyze.failed", { error: message.slice(0, 300) }));
     }

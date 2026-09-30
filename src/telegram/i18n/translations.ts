@@ -25,7 +25,7 @@ const en: Dict = {
     "/remove_token <address> — stop tracking a token (asks to confirm)\n" +
     "/add_owner <network> <token> <owner> — manually link an extra wallet (dev, multisig) to a tracked token\n" +
     "/remove_owner <network> <token> <owner> — unlink a manually-added wallet\n" +
-    "/analyze <network> <deploy_tx_hash> — check any already-deployed contract for migration signs\n" +
+    "/analyze <network> <contract_address | deploy_tx_hash> — check any already-deployed contract for migration signs\n" +
     "/settings — toggle which confidence level / networks alert this chat\n" +
     "/language — change the bot's language\n" +
     "/status — bot health per network (admins only)\n" +
@@ -51,13 +51,17 @@ const en: Dict = {
   "addToken.lookingUp": "Looking up {address} on {network}...",
   "addToken.success": "✅ Now tracking {symbol} ({address}) on {network}.\n\nDiscovered owners/admins:\n{owners}",
   "addToken.refreshed": "ℹ️ {symbol} ({address}) on {network} is already tracked — owners re-checked.\n\nDiscovered owners/admins:\n{owners}",
-  "analyze.usage": "Usage: /analyze <network> <deploy_tx_hash> [token_a_address]\nTake the hash of the transaction that created the contract — on the explorer's contract page it's linked in the \"Contract Creator\" field.\nSupported networks: {networks}",
-  "analyze.invalidHash": "\"{hash}\" is not a transaction hash (0x followed by 64 hex characters).",
+  "analyze.usage": "Usage: /analyze <network> <contract_address or deploy_tx_hash> [token_a_address]\nThe contract's address is enough — the bot finds the transaction that deployed it. Or give that transaction's hash (on the explorer's contract page it's linked in the \"Contract Creator\" field).\nSupported networks: {networks}",
+  "analyze.invalidHash": "\"{hash}\" is neither a contract address (0x + 40 hex characters) nor a transaction hash (0x + 64).",
   "analyze.working": "🔎 Analyzing {hash} on {network}...",
   "analyze.notFound": "Transaction {hash} was not found on {network} — check the network and the hash.",
   "analyze.reverted": "That transaction failed (reverted), so it didn't create a contract.",
   "analyze.noContract": "That transaction didn't create a contract. If it deployed one through a factory, the {network} RPC must support debug_traceTransaction for the bot to see it.",
   "analyze.failed": "Analysis failed: {error}",
+  "analyze.creationUnknown": "Couldn't find the transaction that deployed {address} on {network} (the explorer API doesn't know it, or ETHERSCAN_API_KEY isn't set). Send the deploy transaction's hash instead: on the contract's explorer page it's in the \"Contract Creator\" field, after \"at txn\".",
+  "analyze.autoCandidate": "🔎 Auto-discovery: this contract passes the filters — whether it alerts is up to the liquidity test and dedup. Deployed in block {block}.",
+  "analyze.autoSkipped": "🔎 Auto-discovery would drop this contract: {reason}. Deployed in block {block}.",
+  "analyze.autoFailed": "🔎 Auto-discovery couldn't analyze this contract (RPC error). Deployed in block {block}.",
   "addToken.ownersNone": "  • None found automatically — you can link wallets manually later.",
   "addToken.defaultSymbol": "token",
 
@@ -231,7 +235,7 @@ const uk: Dict = {
     "/remove_token <адреса> — прибрати токен з відстеження (з підтвердженням)\n" +
     "/add_owner <мережа> <токен> <власник> — вручну прив'язати гаманець (розробник, мультисиг) до токена\n" +
     "/remove_owner <мережа> <токен> <власник> — відв'язати вручну доданий гаманець\n" +
-    "/analyze <мережа> <хеш_деплою> — перевірити будь-який уже задеплоєний контракт на ознаки міграції\n" +
+    "/analyze <мережа> <адреса_контракту | хеш_деплою> — перевірити будь-який уже задеплоєний контракт на ознаки міграції\n" +
     "/settings — перемкнути рівень впевненості / мережі для алертів у цьому чаті\n" +
     "/language — змінити мову бота\n" +
     "/status — стан бота по мережах (лише для адмінів)\n" +
@@ -257,13 +261,17 @@ const uk: Dict = {
   "addToken.lookingUp": "Шукаю {address} у мережі {network}...",
   "addToken.success": "✅ Тепер відстежую {symbol} ({address}) у мережі {network}.\n\nЗнайдені власники/адміни:\n{owners}",
   "addToken.refreshed": "ℹ️ {symbol} ({address}) у мережі {network} вже відстежується — власників перевірено заново.\n\nЗнайдені власники/адміни:\n{owners}",
-  "analyze.usage": "Використання: /analyze <мережа> <хеш_транзакції_деплою> [адреса_токена_A]\nВізьміть хеш транзакції, яка створила контракт — на сторінці контракту в експлорері він у полі \"Contract Creator\".\nПідтримувані мережі: {networks}",
-  "analyze.invalidHash": "\"{hash}\" не є хешем транзакції (0x і 64 шістнадцяткові символи).",
+  "analyze.usage": "Використання: /analyze <мережа> <адреса_контракту або хеш_транзакції_деплою> [адреса_токена_A]\nДосить адреси контракту — бот сам знайде транзакцію, яка його створила. Або дайте хеш цієї транзакції (на сторінці контракту в експлорері він у полі \"Contract Creator\").\nПідтримувані мережі: {networks}",
+  "analyze.invalidHash": "\"{hash}\" — це не адреса контракту (0x і 40 шістнадцяткових символів) і не хеш транзакції (0x і 64).",
   "analyze.working": "🔎 Аналізую {hash} у мережі {network}...",
   "analyze.notFound": "Транзакцію {hash} не знайдено в мережі {network} — перевірте мережу та хеш.",
   "analyze.reverted": "Ця транзакція завершилася з помилкою (reverted), тож контракт не створила.",
   "analyze.noContract": "Ця транзакція не створила контракт. Якщо контракт створено через фабрику, RPC мережі {network} має підтримувати debug_traceTransaction, щоб бот його побачив.",
   "analyze.failed": "Аналіз не вдався: {error}",
+  "analyze.creationUnknown": "Не вдалося знайти транзакцію, яка створила {address} у мережі {network} (API експлорера її не знає або не задано ETHERSCAN_API_KEY). Надішліть хеш транзакції деплою: на сторінці контракту в експлорері він у полі \"Contract Creator\", після \"at txn\".",
+  "analyze.autoCandidate": "🔎 Автопошук: контракт проходить фільтри — чи буде алерт, вирішують перевірка ліквідності та дедуп. Задеплоєно в блоці {block}.",
+  "analyze.autoSkipped": "🔎 Автопошук відкинув би цей контракт: {reason}. Задеплоєно в блоці {block}.",
+  "analyze.autoFailed": "🔎 Автопошук не зміг проаналізувати контракт (помилка RPC). Задеплоєно в блоці {block}.",
   "addToken.ownersNone": "  • Автоматично нікого не знайдено — гаманці можна прив'язати вручну пізніше.",
   "addToken.defaultSymbol": "токен",
 
@@ -438,7 +446,7 @@ const ru: Dict = {
     "/remove_token <адрес> — убрать токен из отслеживания (с подтверждением)\n" +
     "/add_owner <сеть> <токен> <владелец> — вручную привязать кошелёк (разработчик, мультисиг) к токену\n" +
     "/remove_owner <сеть> <токен> <владелец> — отвязать вручную добавленный кошелёк\n" +
-    "/analyze <сеть> <хеш_деплоя> — проверить любой уже задеплоенный контракт на признаки миграции\n" +
+    "/analyze <сеть> <адрес_контракта | хеш_деплоя> — проверить любой уже задеплоенный контракт на признаки миграции\n" +
     "/settings — переключить уровень уверенности / сети для алертов в этом чате\n" +
     "/language — сменить язык бота\n" +
     "/status — состояние бота по сетям (только для админов)\n" +
@@ -464,13 +472,17 @@ const ru: Dict = {
   "addToken.lookingUp": "Ищу {address} в сети {network}...",
   "addToken.success": "✅ Теперь отслеживаю {symbol} ({address}) в сети {network}.\n\nНайденные владельцы/админы:\n{owners}",
   "addToken.refreshed": "ℹ️ {symbol} ({address}) в сети {network} уже отслеживается — владельцы перепроверены.\n\nНайденные владельцы/админы:\n{owners}",
-  "analyze.usage": "Использование: /analyze <сеть> <хеш_транзакции_деплоя> [адрес_токена_A]\nВозьмите хеш транзакции, которая создала контракт — на странице контракта в обозревателе он в поле \"Contract Creator\".\nПоддерживаемые сети: {networks}",
-  "analyze.invalidHash": "\"{hash}\" не является хешем транзакции (0x и 64 шестнадцатеричных символа).",
+  "analyze.usage": "Использование: /analyze <сеть> <адрес_контракта или хеш_транзакции_деплоя> [адрес_токена_A]\nДостаточно адреса контракта — бот сам найдёт транзакцию, которая его создала. Или дайте хеш этой транзакции (на странице контракта в обозревателе он в поле \"Contract Creator\").\nПоддерживаемые сети: {networks}",
+  "analyze.invalidHash": "\"{hash}\" — это не адрес контракта (0x и 40 шестнадцатеричных символов) и не хеш транзакции (0x и 64).",
   "analyze.working": "🔎 Анализирую {hash} в сети {network}...",
   "analyze.notFound": "Транзакция {hash} не найдена в сети {network} — проверьте сеть и хеш.",
   "analyze.reverted": "Эта транзакция завершилась с ошибкой (reverted), поэтому контракт не создала.",
   "analyze.noContract": "Эта транзакция не создала контракт. Если контракт создан через фабрику, RPC сети {network} должен поддерживать debug_traceTransaction, чтобы бот его увидел.",
   "analyze.failed": "Анализ не удался: {error}",
+  "analyze.creationUnknown": "Не удалось найти транзакцию, которая создала {address} в сети {network} (API обозревателя её не знает или не задан ETHERSCAN_API_KEY). Пришлите хеш транзакции деплоя: на странице контракта в обозревателе он в поле \"Contract Creator\", после \"at txn\".",
+  "analyze.autoCandidate": "🔎 Автопоиск: контракт проходит фильтры — будет ли алерт, решают проверка ликвидности и дедуп. Задеплоен в блоке {block}.",
+  "analyze.autoSkipped": "🔎 Автопоиск отбросил бы этот контракт: {reason}. Задеплоен в блоке {block}.",
+  "analyze.autoFailed": "🔎 Автопоиск не смог проанализировать контракт (ошибка RPC). Задеплоен в блоке {block}.",
   "addToken.ownersNone": "  • Автоматически никого не найдено — кошельки можно привязать вручную позже.",
   "addToken.defaultSymbol": "токен",
 

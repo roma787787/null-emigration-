@@ -312,7 +312,7 @@ projects' alerts are unaffected.
 /remove_owner <network> <token> <owner_address>    Unlink a manually-added wallet
 /settings                                         Inline-keyboard toggles for confidence + network filters
 /language                                         Change the bot's language
-/analyze <network> <deploy_tx_hash> [token_a]     Analyze any already-deployed contract on demand
+/analyze <network> <contract | deploy_tx> [token_a] Analyze any already-deployed contract on demand
 /status                                           Admins only: per-network health, lag, errors, queue, auto-discovery, OKX
 /custodians, /add_custodian, /remove_custodian    Admins only: RWA deployer registry
 /backfill <network> <range>, /backfill_stop       Admins only: run past blocks through the filters, get a report
@@ -343,10 +343,15 @@ run cancels it.
 `/analyze` runs the same analyzer on the contract(s) an already-mined
 transaction created — a direct deploy or a factory call — and replies with
 the alert card (titled "Contract analysis"; nothing is stored or
-broadcast). Take the hash from the "Contract Creator" field of the
-contract's explorer page. Token A is the optional third argument, else a
-tracked token owned by the creator, preferring one the contract references.
-It's the zero-cost way to check detection against real migration contracts.
+broadcast), followed by what auto-discovery would do with it — pass its
+filters, or the reason it would be dropped — and the block it was deployed
+in (to tell "deployed before the backfill window" from "missed"). The
+contract's address is enough: the bot finds the deploying transaction through
+the Etherscan API (`ETHERSCAN_API_KEY`); or give that transaction's hash, from
+the "Contract Creator" field of the contract's explorer page. Token A is the
+optional third argument, else a tracked token owned by the creator,
+preferring one the contract references. It's the zero-cost way to check
+detection against real migration contracts.
 
 When a deployer owns several tracked tokens, a detection is attributed to
 the token whose address appears in the deploy input (constructor args /

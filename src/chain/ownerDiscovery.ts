@@ -1,39 +1,41 @@
-import { getAddress, isAddressEqual, zeroAddress, type Address } from "viem";
+import { getAddress, isAddressEqual, isHex, zeroAddress, type Address, type Hex } from "viem";
 import type { NetworkKey, OwnerSource } from "../types/index.js";
 import { getPublicClient } from "./provider.js";
 import { getNetwork } from "../config/networks.js";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 
-const ETHERSCAN_V2_API_URL = "https://api.etherscan.io/v2/api";
+const etherscanApiUrl = () => process.env.ETHERSCAN_API_URL || "https://api.etherscan.io/v2/api";
 
 export interface DiscoveredOwner {
   address: Address;
   source: OwnerSource;
 }
 
+export interface ContractCreation {
+  creator: Address;
+  txHash: Hex;
+}
+
 /**
- * Looks up the "Contract Creator" / tx.from of the token's deployment
- * transaction via Etherscan's unified multichain API (one API key, `chainid`
- * selects the network — covers every network in networks.ts, not just
- * Ethereum). Mirrors the "Contract Creator" field shown on a token's
- * Etherscan-family explorer page.
+ * The "Contract Creator" of a contract and the transaction that deployed it,
+ * via Etherscan's unified multichain API (one API key, `chainid` selects the
+ * network — covers every network in networks.ts, not just Ethereum).
  *
- * Requires `ETHERSCAN_API_KEY` (see .env.example). Falls back to null when
- * unset — callers should still get owner()/admin() results from
- * getOnChainOwners().
+ * Requires `ETHERSCAN_API_KEY` (see .env.example); null when unset, unknown
+ * to the explorer, or the API fails.
  */
-export async function getContractDeployer(network: NetworkKey, tokenAddress: Address): Promise<Address | null> {
+export async function getContractCreation(network: NetworkKey, contractAddress: Address): Promise<ContractCreation | null> {
   if (!env.ETHERSCAN_API_KEY) {
     logger.warn({ network }, "ETHERSCAN_API_KEY not configured, skipping deployer lookup");
     return null;
   }
 
-  const url = new URL(ETHERSCAN_V2_API_URL);
+  const url = new URL(etherscanApiUrl());
   url.searchParams.set("chainid", String(getNetwork(network).chain.id));
   url.searchParams.set("module", "contract");
   url.searchParams.set("action", "getcontractcreation");
-  url.searchParams.set("contractaddresses", tokenAddress);
+  url.searchParams.set("contractaddresses", contractAddress);
   url.searchParams.set("apikey", env.ETHERSCAN_API_KEY);
 
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
@@ -44,11 +46,20 @@ export async function getContractDeployer(network: NetworkKey, tokenAddress: Add
 
   const body = (await response.json()) as {
     status: string;
-    result?: Array<{ contractCreator: string }>;
+    result?: Array<{ contractCreator?: string; txHash?: string }> | string;
   };
+  const row = Array.isArray(body.result) ? body.result[0] : undefined;
+  if (!row?.contractCreator || !row.txHash || !isHex(row.txHash) || row.txHash.length !== 66) return null;
+  return { creator: getAddress(row.contractCreator), txHash: row.txHash };
+}
 
-  const creator = body.result?.[0]?.contractCreator;
-  return creator ? getAddress(creator) : null;
+/**
+ * The deployer of the token ("Contract Creator" on its Etherscan-family
+ * explorer page). Null without `ETHERSCAN_API_KEY` — callers should still get
+ * owner()/admin() results from getOnChainOwners().
+ */
+export async function getContractDeployer(network: NetworkKey, tokenAddress: Address): Promise<Address | null> {
+  return (await getContractCreation(network, tokenAddress))?.creator ?? null;
 }
 
 const OWNER_ABI = [

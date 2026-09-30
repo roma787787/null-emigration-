@@ -23,6 +23,9 @@ process.env.LOG_LEVEL ??= "error";
 process.env.BACKFILL_BLOCKS_PER_SEC = "500"; // /backfill runs at test speed
 process.env.NODE_ENV = "production";
 process.env.SIGNATURE_DB_URL = "off";
+// A fake Etherscan (below) answers getcontractcreation for /analyze <address>.
+process.env.ETHERSCAN_API_KEY = "test";
+process.env.ETHERSCAN_API_URL = "http://127.0.0.1:8549/v2/api";
 process.env.RECHECK_DELAYS_SEC = "3,6,9,12";
 
 const ADMIN = 1001; // admin, English
@@ -146,12 +149,26 @@ async function deploy(from: typeof owner, name: string, args: unknown[] = []) {
   const { abi, bytecode } = artifacts[name]!;
   const hash = await from.deployContract({ abi, bytecode, args } as never);
   const receipt = await chainClient.waitForTransactionReceipt({ hash });
-  return { address: receipt.contractAddress!, hash };
+  return { address: receipt.contractAddress!, hash, blockNumber: receipt.blockNumber };
 }
 async function write(from: typeof owner, address: Address, name: string, functionName: string, args: unknown[]) {
   const hash = await from.writeContract({ address, abi: artifacts[name]!.abi, functionName, args } as never);
   await chainClient.waitForTransactionReceipt({ hash });
 }
+
+// Fake Etherscan: getcontractcreation for the contracts registered here, empty otherwise.
+const creations = new Map<string, { creator: string; txHash: string }>();
+const etherscanApi = createServer((req, res) => {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const row = creations.get((url.searchParams.get("contractaddresses") ?? "").toLowerCase());
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify(
+    row && url.searchParams.get("action") === "getcontractcreation" && url.searchParams.get("apikey") === "test"
+      ? { status: "1", message: "OK", result: [{ contractAddress: url.searchParams.get("contractaddresses"), contractCreator: row.creator, txHash: row.txHash }] }
+      : { status: "0", message: "No data found", result: [] },
+  ));
+});
+await new Promise<void>((r) => etherscanApi.listen(8549, "127.0.0.1", r));
 
 await runMigrations();
 await pool.query("TRUNCATE tokens, chat_settings, network_cursors RESTART IDENTITY CASCADE");
@@ -388,6 +405,33 @@ check(
   has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}[\\s\\S]*Ліквідність`, "i")),
   textsTo(r, ALICE),
 );
+const autoLine = (text: string) => text.includes("Автопошук: контракт проходить фільтри");
+check(
+  "/analyze says what auto-discovery would do with the contract and the block it was deployed in",
+  textsTo(r, ALICE).some((m) => autoLine(m) && m.includes(`блоці ${byStranger.blockNumber}`)),
+  textsTo(r, ALICE),
+);
+creations.set(byStranger.address.toLowerCase(), { creator: strangerWallet.account.address, txHash: byStranger.hash });
+r = await send(ALICE, `/analyze anvil ${byStranger.address}`);
+check(
+  "/analyze <contract address> finds the deploy transaction itself (explorer API) and analyzes it",
+  has(textsTo(r, ALICE), new RegExp(`${byStranger.hash}`)) && has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}`, "i")) &&
+    textsTo(r, ALICE).some(autoLine),
+  textsTo(r, ALICE),
+);
+r = await send(ALICE, `/analyze anvil ${oldToken.address}`);
+check(
+  "/analyze <address> the explorer doesn't know asks for the deploy hash instead",
+  has(textsTo(r, ALICE), /Не вдалося знайти транзакцію[\s\S]*at txn/),
+  textsTo(r, ALICE),
+);
+const launchpad = await deploy(strangerWallet, "LaunchpadTokenWithMigrate", [oldToken.address]);
+r = await send(ALICE, `/analyze anvil ${launchpad.hash}`);
+check(
+  "/analyze of a contract auto-discovery filters out names the reason",
+  has(textsTo(r, ALICE), /Автопошук відкинув би цей контракт: launchpad token/),
+  textsTo(r, ALICE),
+);
 r = await send(ALICE, "/status");
 check("/status is refused for a non-admin", has(textsTo(r, ALICE), /лише адміністраторам/), textsTo(r, ALICE));
 
@@ -505,8 +549,8 @@ r = await send(ADMIN, "/backfill_stop");
 check("/backfill_stop with nothing running says so", has(textsTo(r, ADMIN), /No backfill is running/), textsTo(r, ADMIN));
 {
   const mark = calls.length;
-  r = await send(ADMIN, "/backfill anvil 150");
-  check("/backfill anvil 150 starts in the background and says what it will scan", has(textsTo(r, ADMIN), /Backfill started: anvil, blocks \d+–\d+ \(150 blocks/), textsTo(r, ADMIN));
+  r = await send(ADMIN, "/backfill anvil 50");
+  check("/backfill anvil 50 starts in the background and says what it will scan", has(textsTo(r, ADMIN), /Backfill started: anvil, blocks \d+–\d+ \(50 blocks/), textsTo(r, ADMIN));
   const until = Date.now() + 90_000;
   while (!calls.slice(mark).some((c) => c.method === "sendDocument") && Date.now() < until) await new Promise((res) => setTimeout(res, 250));
   const later = calls.slice(mark);
@@ -534,6 +578,7 @@ check("no message has unfilled placeholders, 'undefined' or raw translation keys
 await stopListener();
 await worker.close();
 telegramApi.close();
+etherscanApi.close();
 console.log(`\n${calls.length} Bot API calls, ${outgoing.length} messages checked`);
 console.log(failures === 0 ? "ALL PASSED" : `${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
