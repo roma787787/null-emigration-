@@ -102,8 +102,9 @@ export async function wrapsBaseAsset(client: PublicClient, network: NetworkKey, 
 }
 
 // migrate<Object> where the object is a position, not a token: staking,
-// LP, loans, vaults, locks, NFTs moved between a protocol's own contracts.
-const POSITION_MIGRATION = /^migrate(Stakes?|Staking|Positions?|Liquidity|Lp|Loans?|LoanParams|Vaults?|Pools?|Locks?|Deposits?|Rewards?|Farms?|Nfts?)/i;
+// LP, loans, vaults, locks, NFTs, accounts, funds moved between a protocol's
+// own contracts or addresses.
+const POSITION_MIGRATION = /^migrate(Stakes?|Staking|Positions?|Liquidity|Lp|Loans?|LoanParams|Vaults?|Pools?|Locks?|Deposits?|Rewards?|Farms?|Nfts?|Accounts?|Users?|Funds?)/i;
 // A zero-argument function counts only when it is the bare verb (migrate() /
 // convert() of the caller's whole balance); `convertStep()`, `migrationEnded()`
 // and the like are views.

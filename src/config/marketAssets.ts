@@ -10,7 +10,7 @@ export interface QuoteToken {
 interface MarketSpec {
   /** Dollar stablecoin the liquidity test swaps from ($1,000 of it by default). */
   quote: QuoteToken;
-  /** Wrapped native + major stables: never a migration's old token, so auto-discovery ignores contracts whose Token A is one of them (DEX pools, routers). */
+  /** Wrapped native, major stables and bridged blue chips (WBTC, BTCB, Binance-Peg ETH): never a migration's old token, so auto-discovery ignores contracts whose Token A is one of them (DEX pools, routers). */
   baseAssets: string[];
 }
 
@@ -26,6 +26,7 @@ const SPECS: Record<string, MarketSpec> = {
       "0xdac17f958d2ee523a2206206994597c13d831ec7", // USDT
       "0x6b175474e89094c44da98b954eedeac495271d0f", // DAI
       "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", // WBTC
+      "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", // cbBTC
     ],
   },
   bsc: {
@@ -35,6 +36,8 @@ const SPECS: Record<string, MarketSpec> = {
       "0x55d398326f99059ff775485246999027b3197955", // USDT
       "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC
       "0xe9e7cea3dedca5984780bafc599bd69add087d56", // BUSD
+      "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
+      "0x2170ed0880ac9a755fd29b2688956bd959f933f8", // Binance-Peg ETH
     ],
   },
   arbitrum: {
@@ -43,6 +46,7 @@ const SPECS: Record<string, MarketSpec> = {
       "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
       "0xaf88d065e77c8cc2239327c5edb3a432268e5831", // USDC
       "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
+      "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
     ],
   },
   base: {
@@ -51,6 +55,7 @@ const SPECS: Record<string, MarketSpec> = {
     baseAssets: [
       "0x4200000000000000000000000000000000000006", // WETH
       "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", // USDC
+      "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", // cbBTC
     ],
   },
   optimism: {
@@ -59,6 +64,7 @@ const SPECS: Record<string, MarketSpec> = {
       "0x4200000000000000000000000000000000000006", // WETH
       "0x0b2c639c533813f4aa9d7837caf62653d097ff85", // USDC
       "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", // USDT
+      "0x68f180fcce6836688e9084f035309e29bf0a2095", // WBTC
     ],
   },
   polygon: {
@@ -67,6 +73,8 @@ const SPECS: Record<string, MarketSpec> = {
       "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270", // WPOL
       "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", // USDC
       "0xc2132d05d31c914a87c6611c10748aeb04b58e8f", // USDT
+      "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619", // WETH
+      "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6", // WBTC
     ],
   },
   avalanche: {

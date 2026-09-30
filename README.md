@@ -188,7 +188,8 @@ find migrations. For every block on every enabled network:
    `CONVERT_MAX_BPS()`, zero-argument views like `convertStep()`, ERC-4626's
    `convertToShares`/`convertToAssets`, or position moves between a
    protocol's own contracts — `migrateStake`, `migrateLiquidity`,
-   `migratePosition`, `migrateLoan*`, `migrateVault`…), an `oldToken()`-style getter (`oldToken`,
+   `migratePosition`, `migrateLoan*`, `migrateVault`, `migrateAccount`,
+   `migrateFunds`…), an `oldToken()`-style getter (`oldToken`,
    `legacyToken`, `previousToken`, `v1Token`…; not `tokenIn`/`fromToken`,
    which every swap bot has), or an `xToY` converter whose x and y are its own
    token getters. `swap*`/`exchange*` alone never qualify — bots, zaps and
@@ -212,8 +213,9 @@ find migrations. For every block on every enabled network:
    `mkrToSky` → `mkr()`/`sky()`); a token with `migrate()` is itself Token B;
    when names don't tell, the token with a market is Token A — and when both
    trade (a new token listed before its migration opens, like Telcoin's TEL v3
-   on Base), the one deployed first (found by bisecting `eth_getCode`). Wrapped native
-   and stablecoins are never Token A, nor are wrappers of them (Aave's
+   on Base), the one deployed first (found by bisecting `eth_getCode`). Wrapped native,
+   stablecoins and bridged blue chips (WBTC, cbBTC, BTCB, Binance-Peg ETH) are
+   never Token A, nor are wrappers of them (Aave's
    aWETH, Compound's cUSDC, vault shares — via `UNDERLYING_ASSET_ADDRESS()`,
    `underlying()`, `asset()`). Symbols are only displayed — never
    matched — so same-ticker tokens on other chains can't be confused. A
