@@ -42,7 +42,7 @@ const KNOWN = [
   "name()", "symbol()", "decimals()", "deploy(address,address,bytes32)",
   "migrate(address)", "uniswapV3SwapCallback(int256,int256,bytes)", "UNDERLYING_ASSET_ADDRESS()",
   "migrate()", "startMigration()", "finalizeMigration()", "migrating()",
-  "converter()", "underlying()", "legacyToken()", "migrateLegacyMatic(uint256)", "migrateStake(address,uint256)", "stakingToken()",
+  "converter()", "convert(uint256)", "convertFromOld(uint256)", "tao()", "legacy()", "underlying()", "legacyToken()", "migrateLegacyMatic(uint256)", "migrateStake(address,uint256)", "stakingToken()",
   "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
@@ -413,6 +413,16 @@ cases.push({
   label: "wrapper token with a converter() getter over a traded token (Ondo TSLAon, UNI, CULT wrappers) → ignored",
   address: await deployTimed(stranger, "WrapperWithConverter", [oldTwin, realLend]),
   expect: expectNone,
+});
+cases.push({
+  label: "new token with a bare convert() over a traded token (wTAO → subnet-style tokens) → ignored",
+  address: await deployTimed(stranger, "ConvertMintToken", [oldTwin]),
+  expect: expectNone,
+});
+cases.push({
+  label: "new token with convertFromOld() over its old token → alert (the token itself is Token B)",
+  address: await deployTimed(stranger, "ConvertFromOldToken", [oldToken]),
+  expect: expectAlert((r) => (!eq(r.tokenAAddress, oldToken) || r.tokenBSource !== "contract_itself" ? `A ${r.tokenAAddress} B ${r.tokenBAddress} via ${r.tokenBSource}` : null)),
 });
 cases.push({
   label: "share token with migrate() + convertToShares/convertToAssets but no asset() (the MATIC vault) → ignored",

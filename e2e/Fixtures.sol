@@ -483,3 +483,18 @@ contract StableConverter {
     constructor(address a, address b) { fromToken = a; toToken = b; }
     function convert(address, address, uint256) external {}
 }
+
+/// wTAO style: a new token minted for an existing, traded one through a bare
+/// convert() — a wrapper or a sale, not a migration.
+contract ConvertMintToken is SimpleToken {
+    address public tao;
+    constructor(address t) SimpleToken("Subnet", "SN", 1e24) { tao = t; }
+    function convert(uint256) external {}
+}
+
+/// A new token that names what it converts from: still a migration.
+contract ConvertFromOldToken is SimpleToken {
+    address public legacy;
+    constructor(address t) SimpleToken("Next", "NXT", 1e24) { legacy = t; }
+    function convertFromOld(uint256) external {}
+}

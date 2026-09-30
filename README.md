@@ -189,7 +189,9 @@ find migrations. For every block on every enabled network:
    `convertToShares`/`convertToAssets`, or position moves between a
    protocol's own contracts — `migrateStake`, `migrateLiquidity`,
    `migratePosition`, `migrateLoan*`, `migrateVault`, `migrateAccount`,
-   `migrateFunds`…), an `oldToken()`-style getter (`oldToken`,
+   `migrateFunds`…) — and on a contract that is itself a token, a bare
+   `convert()` (a wrapper's or a mint's entry, e.g. tokens issued for wTAO)
+   unless it names what it converts from (`convertFromOld`, `oldToken()`) —, an `oldToken()`-style getter (`oldToken`,
    `legacyToken`, `previousToken`, `v1Token`…; not `tokenIn`/`fromToken`,
    which every swap bot has), or an `xToY` converter whose x and y are its own
    token getters. `swap*`/`exchange*` alone never qualify — bots, zaps and

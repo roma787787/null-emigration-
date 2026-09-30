@@ -127,6 +127,12 @@ export async function analyzeAutoCandidate(
   // ones — the shape of a "TokenSwap" migrator (bots and zaps take routes,
   // paths, minimum outputs, not a bare amount).
   const amountOnlySwaps = swapNames.filter((s) => AMOUNT_ONLY_SWAP.test(s));
+  // On a token, a bare convert() is a wrapper's or a mint's entry (a token
+  // issued for wTAO, a stock wrapper): the new token of a migration calls it
+  // migrate, or names what it converts from (convertFromOld, oldToken()).
+  if (isToken && !oldGetter && nameSignals.length > 0 && nameSignals.every((s) => /^convert/i.test(nameOf(s)) && !OLD_NAME.test(nameOf(s)))) {
+    return { kind: "skipped", reason: "token with a bare convert() (wrapper or mint)" };
+  }
   const swapOnly = nameSignals.length === 0 && !oldGetter && converterNames.length === 0;
   if (swapOnly && amountOnlySwaps.length === 0) {
     return { kind: "skipped", reason: swapNames.length > 0 ? "swap functions only" : "no migration signature" };
