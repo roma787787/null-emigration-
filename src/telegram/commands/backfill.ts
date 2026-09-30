@@ -53,6 +53,7 @@ export function formatBackfillSummary(lang: Language, report: BackfillReport): s
       alert: counts.alert,
       liquidity: counts.liquidity,
       swap: counts["swap-bot"],
+      stable: counts.stablecoin,
       unchecked: counts.unchecked,
       duplicate: counts.duplicate,
     }),

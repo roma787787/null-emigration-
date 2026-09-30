@@ -291,7 +291,31 @@ export type LiquidityDecision =
   | { kind: "pass"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> | null }
   /** OKX could not answer; the worker retries before sending it unchecked. */
   | { kind: "unchecked"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> }
-  | { kind: "drop"; reason: "liquidity" | "swap between two traded tokens"; result: AutoAnalysisResult; liquidity: Record<LiquidityLevel, LiquidityCheck> | null };
+  | {
+      kind: "drop";
+      reason: "liquidity" | "swap between two traded tokens" | "stablecoin converter";
+      result: AutoAnalysisResult;
+      liquidity: Record<LiquidityLevel, LiquidityCheck> | null;
+    };
+
+const DECIMALS_ABI = [{ type: "function", name: "decimals", inputs: [], outputs: [{ type: "uint8" }], stateMutability: "view" }] as const;
+
+/**
+ * Whether the test swap priced `token` at about one dollar (the $300 buys
+ * 291–309 tokens): a stablecoin. A contract converting one dollar token into
+ * another (RLUSD → PYUSD, crvUSD ↔ reUSD) is a stablecoin converter, not a
+ * migration — and needs no list of stablecoins per chain.
+ */
+export async function pricedAsDollar(network: NetworkKey, token: `0x${string}`, check: LiquidityCheck): Promise<boolean> {
+  if (check.status !== "pass" || !check.amountOut) return false;
+  const decimals = await getPublicClient(network)
+    .readContract({ address: token, abi: DECIMALS_ABI, functionName: "decimals" })
+    .catch(() => null);
+  if (decimals === null) return false;
+  const tokens = Number(BigInt(check.amountOut) * 1000n / 10n ** BigInt(decimals)) / 1000;
+  const perDollar = tokens / check.amountUsd;
+  return perDollar >= 0.97 && perDollar <= 1.03;
+}
 
 /**
  * The OKX part of the spec workflow for a candidate, shared by the live
@@ -333,6 +357,9 @@ export async function applyLiquidityRules(
   }
   if (liquidity.LOW_CAP.status === "unchecked" && isOkxConfigured()) return { kind: "unchecked", result, liquidity };
   if (liquidity.LOW_CAP.status === "skip") return { kind: "drop", reason: "liquidity", result, liquidity };
+  if (await pricedAsDollar(network, result.tokenAAddress, liquidity.LOW_CAP)) {
+    return { kind: "drop", reason: "stablecoin converter", result, liquidity };
+  }
   return { kind: "pass", result, liquidity };
 }
 

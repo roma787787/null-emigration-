@@ -34,11 +34,14 @@ export function isLiquidityPool(selectors: Hex[]): boolean {
 }
 
 // ERC-4626 vaults: a share token over an underlying asset(), with the
-// standard convertToShares/convertToAssets — deposits, not migrations.
+// standard convertToShares/convertToAssets — deposits, not migrations. Both
+// conversions together mark a share token even without asset()/totalAssets()
+// (staking vaults that also take a legacy token, e.g. MATIC into a POL vault).
 const VAULT_SELECTORS = ["asset()", "totalAssets()"].map((sig) => toFunctionSelector(sig));
 const VAULT_CONVERT = ["convertToShares(uint256)", "convertToAssets(uint256)"].map((sig) => toFunctionSelector(sig));
 
 export function isErc4626Vault(selectors: Hex[]): boolean {
+  if (VAULT_CONVERT.every((s) => selectors.includes(s))) return true;
   return VAULT_SELECTORS.every((s) => selectors.includes(s)) && VAULT_CONVERT.some((s) => selectors.includes(s));
 }
 
@@ -98,16 +101,30 @@ export async function wrapsBaseAsset(client: PublicClient, network: NetworkKey, 
   return false;
 }
 
+// migrate<Object> where the object is a position, not a token: staking,
+// LP, loans, vaults, locks, NFTs moved between a protocol's own contracts.
+const POSITION_MIGRATION = /^migrate(Stakes?|Staking|Positions?|Liquidity|Lp|Loans?|LoanParams|Vaults?|Pools?|Locks?|Deposits?|Rewards?|Farms?|Nfts?)/i;
+// A zero-argument function counts only when it is the bare verb (migrate() /
+// convert() of the caller's whole balance); `convertStep()`, `migrationEnded()`
+// and the like are views.
+const BARE_VERB = /^(migrate|convert)(All|Tokens?|Balance)?$/i;
+
 /**
- * A function that performs a migration — `migrate`, `migrateFromLEND`,
- * `convertTokens` — as opposed to settings, flags and views that merely
- * mention it (`setMigratedPool`, `migratedPools`, `migrationEnded`,
- * `isConverted`) or ERC-4626's `convertToShares`/`convertToAssets`.
+ * A function that performs a token migration, by its signature —
+ * `migrate(uint256)`, `migrateFromLEND(uint256)`, `convertTokens(uint256)`,
+ * `convert()` — as opposed to settings, flags and views that merely mention it
+ * (`setMigratedPool`, `migratedPools`, `migrationEnded`, `isConverted`), nouns
+ * (`converter()`), constants (`CONVERT_MAX_BPS()`), ERC-4626's
+ * `convertToShares`/`convertToAssets`, and position moves (`migrateStake`).
  */
-export function isMigrationAction(name: string): boolean {
+export function isMigrationAction(signature: string): boolean {
+  const name = signature.split("(")[0] ?? "";
+  if (/^[A-Z0-9_]+$/.test(name)) return false;
   if (!/^(migrate|convert)/i.test(name)) return false;
-  if (/^(migrated|converted)/i.test(name)) return false;
-  return !/^convertTo(Shares|Assets)$/i.test(name);
+  if (/^(migrated|converted|converter|convertible)/i.test(name)) return false;
+  if (/^convertTo(Shares|Assets)$/i.test(name)) return false;
+  if (POSITION_MIGRATION.test(name)) return false;
+  return signature.endsWith("()") ? BARE_VERB.test(name) : true;
 }
 
 // Upgradeable-proxy entry points: a proxy that has them but no implementation

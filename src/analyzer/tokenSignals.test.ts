@@ -4,22 +4,41 @@ import { toFunctionSelector } from "viem";
 import { isErc4626Vault, isMigrationAction } from "./tokenSignals.js";
 
 test("migration actions count; settings, flags, views and ERC-4626 conversions don't", () => {
-  for (const name of ["migrate", "migrateFromLEND", "migrateTokens", "convert", "convertTokens", "convertOldToNew"]) {
-    assert.equal(isMigrationAction(name), true, name);
-  }
-  for (const name of [
-    "setMigratedPool", "setMigratedPools", "migratedPools", "migrationEnded", "migrationStarted",
-    "isConverted", "convertedAmount", "convertToShares", "convertToAssets", "_totalLendMigrated",
+  for (const sig of [
+    "migrate(uint256)", "migrate()", "migrateFromLEND(uint256)", "migrateTokens(uint256)", "convert()", "convertTokens(uint256)",
+    "convertOldToNew(uint256)", "migrateAll()",
+    // from the Ethereum backfill: Hunt Town's migrator
+    "migrate(uint256[],uint256)", "migrateByOperator(uint256,address,bytes32,uint256)",
   ]) {
-    assert.equal(isMigrationAction(name), false, name);
+    assert.equal(isMigrationAction(sig), true, sig);
+  }
+  for (const sig of [
+    "setMigratedPool(address,bool)", "setMigratedPools(address[],bool)", "migratedPools(address)", "migrationEnded()", "migrationStarted()",
+    "isConverted(address)", "convertedAmount()", "convertToShares(uint256)", "convertToAssets(uint256)", "_totalLendMigrated()",
+  ]) {
+    assert.equal(isMigrationAction(sig), false, sig);
   }
 });
 
-test("ERC-4626 vaults are recognised by asset/totalAssets + convertTo*", () => {
+test("backfill false positives: nouns, constants, views and position moves are not token migrations", () => {
+  for (const sig of [
+    "converter()", // Ondo TSLAon / TLTon wrappers, UNI and CULT wrappers
+    "CONVERT_MAX_BPS()", "CONVERT_MIN()", "convertStep()", // wTAO converter's parameters
+    "migrateStake(address,uint256)", // EARN staking
+    "migrateLoanParamsList(address,uint256,uint256)", // bZx loans
+    "migrateLiquidity(address,uint256)", "migratePosition(uint256)",
+  ]) {
+    assert.equal(isMigrationAction(sig), false, sig);
+  }
+});
+
+test("ERC-4626 vaults are recognised by asset/totalAssets + convertTo*, or by both conversions", () => {
   const sel = (...sigs: string[]) => sigs.map((s) => toFunctionSelector(s));
   assert.equal(isErc4626Vault(sel("asset()", "totalAssets()", "convertToShares(uint256)", "convertToAssets(uint256)")), true);
   assert.equal(isErc4626Vault(sel("asset()", "convertToShares(uint256)")), false);
   assert.equal(isErc4626Vault(sel("migrate(uint256)", "oldToken()")), false);
+  // the MATIC vault from the backfill: migrate() + both conversions, no asset()/totalAssets()
+  assert.equal(isErc4626Vault(sel("migrate(uint256)", "migrateLegacyMatic(uint256)", "convertToShares(uint256)", "convertToAssets(uint256)")), true);
 });
 
 test("swap / flash-loan callbacks mark a bot, not a migrator", async () => {

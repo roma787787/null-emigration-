@@ -448,3 +448,38 @@ contract PhasedLaunchToken {
     function startMigration() external { migrating = true; }
     function finalizeMigration() external { migrating = false; }
 }
+
+/// Backfill shapes (Ethereum, 7 days) that are not token migrations:
+
+/// Ondo TSLAon / UNI / CULT wrappers: the token itself, with a converter() getter.
+contract WrapperWithConverter is SimpleToken {
+    address public underlying;
+    address public converter;
+    constructor(address u, address c) SimpleToken("Wrapped", "wRAP", 1e24) { underlying = u; converter = c; }
+}
+
+/// The MATIC share token: migrate() for the legacy token, share conversions, no asset()/totalAssets().
+contract ShareTokenWithMigrate is SimpleToken {
+    address public legacyToken;
+    constructor(address l) SimpleToken("Staked Share", "sSHR", 1e24) { legacyToken = l; }
+    function migrate(uint256) external {}
+    function migrateLegacyMatic(uint256) external {}
+    function convertToShares(uint256 a) external pure returns (uint256) { return a; }
+    function convertToAssets(uint256 s) external pure returns (uint256) { return s; }
+}
+
+/// EARN: a staking contract moving stakes, with the staked token referenced.
+contract StakeMigrator {
+    address public stakingToken;
+    address public newStaking;
+    constructor(address t, address n) { stakingToken = t; newStaking = n; }
+    function migrateStake(address, uint256) external {}
+}
+
+/// RLUSD -> PYUSD, crvUSD <-> reUSD: a converter between two dollar tokens.
+contract StableConverter {
+    address public fromToken;
+    address public toToken;
+    constructor(address a, address b) { fromToken = a; toToken = b; }
+    function convert(address, address, uint256) external {}
+}

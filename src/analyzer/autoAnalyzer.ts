@@ -119,7 +119,7 @@ export async function analyzeAutoCandidate(
   // only once x and y turn out to be its own token getters (below); and
   // swap/exchange never alone — bots, zaps, presales and fee plumbing are
   // full of them — only alongside one of the above.
-  const nameSignals = strong.filter((s) => isMigrationAction(nameOf(s)));
+  const nameSignals = strong.filter((s) => isMigrationAction(s));
   const converterNames = isToken ? [] : strong.filter((s) => X_TO_Y.test(nameOf(s)) && !SWAP_NAME.test(nameOf(s)));
   const swapNames = isToken ? [] : strong.filter((s) => SWAP_NAME.test(nameOf(s)) && !TOKEN_MIGRATION_NAME.test(nameOf(s)));
   const oldGetter = hasOldTokenGetter(selectors);

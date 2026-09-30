@@ -40,6 +40,8 @@ export interface LiquidityCheck {
   /** Absolute price impact of the test swap, when OKX returned a route. */
   impactPercent: number | null;
   reason: string;
+  /** Raw amount of the token the test swap buys (its smallest units), when OKX returned a route. */
+  amountOut?: string | null;
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // spec: cache per token address for 5 minutes
@@ -99,7 +101,7 @@ interface QuoteResponse {
 export function verdictFromQuote(
   body: QuoteResponse,
   level: LiquidityLevel,
-): Pick<LiquidityCheck, "status" | "impactPercent" | "reason"> {
+): Pick<LiquidityCheck, "status" | "impactPercent" | "reason" | "amountOut"> {
   const { maxImpactPercent } = liquidityLevel(level);
   if (body.code !== "0") {
     const code = String(body.code ?? "?");
@@ -113,9 +115,10 @@ export function verdictFromQuote(
   if (quote.toToken?.isHoneyPot) return { status: "skip", impactPercent: null, reason: "honeypot" };
   const impact = Math.abs(Number(quote.priceImpactPercent ?? quote.priceImpactPercentage));
   if (!Number.isFinite(impact)) return { status: "unchecked", impactPercent: null, reason: "no price impact in quote" };
+  const amountOut = quote.toTokenAmount;
   return impact <= maxImpactPercent
-    ? { status: "pass", impactPercent: impact, reason: `impact ${impact}%` }
-    : { status: "skip", impactPercent: impact, reason: `impact ${impact}% > ${maxImpactPercent}%` };
+    ? { status: "pass", impactPercent: impact, reason: `impact ${impact}%`, amountOut }
+    : { status: "skip", impactPercent: impact, reason: `impact ${impact}% > ${maxImpactPercent}%`, amountOut };
 }
 
 const cache = new Map<string, { at: number; check: LiquidityCheck }>();

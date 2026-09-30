@@ -42,6 +42,8 @@ const KNOWN = [
   "name()", "symbol()", "decimals()", "deploy(address,address,bytes32)",
   "migrate(address)", "uniswapV3SwapCallback(int256,int256,bytes)", "UNDERLYING_ASSET_ADDRESS()",
   "migrate()", "startMigration()", "finalizeMigration()", "migrating()",
+  "converter()", "underlying()", "legacyToken()", "migrateLegacyMatic(uint256)", "migrateStake(address,uint256)", "stakingToken()",
+  "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -55,7 +57,7 @@ await new Promise<void>((r) => sigDb.listen(8547, "127.0.0.1", r));
 process.env.SIGNATURE_DB_URL = "http://127.0.0.1:8547/signature-database/v1/lookup";
 
 // --- OKX DEX API stub: per Token A, the price impact for $300 and $1,000 ------------
-type Impacts = { low: number; strict: number; deep?: number };
+type Impacts = { low: number; strict: number; deep?: number; dollar?: boolean };
 type Market = Impacts | "noroute" | { failFirst: number; then: Impacts };
 const markets = new Map<string, Market>();
 const okxRequests = new Map<string, number>();
@@ -78,7 +80,9 @@ const okx = createServer((req, res) => {
   if (!market || market === "noroute") return void res.end(JSON.stringify({ code: "82000", msg: "Insufficient liquidity" }));
   // $300 → low, $1,000 → strict, $10,000 → deep (default: 3× the $1,000 impact).
   const impact = amount >= 10000n * 10n ** 18n ? (market.deep ?? market.strict * 3) : amount >= 1000n * 10n ** 18n ? market.strict : market.low;
-  res.end(JSON.stringify({ code: "0", msg: "", data: [{ toTokenAmount: "1000", priceImpactPercent: String(-impact) }] }));
+  // A dollar token: $N buys N of it (same raw amount: the test stable and the token both have 18 decimals).
+  const toTokenAmount = market.dollar ? amount.toString() : "1000";
+  res.end(JSON.stringify({ code: "0", msg: "", data: [{ toTokenAmount, priceImpactPercent: String(-impact) }] }));
 });
 await new Promise<void>((r) => okx.listen(8549, "127.0.0.1", r));
 Object.assign(process.env, {
@@ -391,6 +395,32 @@ cases.push({
 cases.push({ label: "ERC-4626 vault over a liquid asset (gtWETH / USDG vault shape) → ignored", address: await deployTimed(stranger, "Erc4626LikeVault", [realLend]), expect: expectNone });
 cases.push({ label: "ERC-4626 vault that also has migrate(uint256) (MATIC vault shape) → ignored", address: await deployTimed(stranger, "VaultWithMigrate", [realLend]), expect: expectNone });
 cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });
+// Ethereum backfill, 7 days: 12 would-be alerts, most of them these shapes.
+cases.push({
+  label: "wrapper token with a converter() getter over a traded token (Ondo TSLAon, UNI, CULT wrappers) → ignored",
+  address: await deployTimed(stranger, "WrapperWithConverter", [oldTwin, realLend]),
+  expect: expectNone,
+});
+cases.push({
+  label: "share token with migrate() + convertToShares/convertToAssets but no asset() (the MATIC vault) → ignored",
+  address: await deployTimed(stranger, "ShareTokenWithMigrate", [oldTwin]),
+  expect: expectNone,
+});
+cases.push({
+  label: "staking contract moving stakes, migrateStake(address,uint256) (EARN) → ignored",
+  address: await deployTimed(stranger, "StakeMigrator", [oldTwin, newToken2]),
+  expect: expectNone,
+});
+const rlusd = await token("Ripple USD", "RLUSD");
+const pyusd = await token("PayPal USD", "PYUSD");
+markets.set(lower(rlusd), { low: 0.01, strict: 0.01, deep: 0.02, dollar: true });
+markets.set(lower(pyusd), { low: 0.01, strict: 0.01, deep: 0.02, dollar: true });
+cases.push({
+  label: "converter between two dollar tokens, convert(address,address,uint256) (RLUSD → PYUSD, crvUSD ↔ reUSD) → ignored",
+  address: await deployTimed(stranger, "StableConverter", [rlusd, pyusd]),
+  expect: expectNone,
+});
+
 // BSC cards (BNC4 / NVDAB / QQQB / FXIon…): launchpad tokens whose quote token trades.
 cases.push({
   label: "launchpad token with pool-graduation settings AND a function named migrate() → ignored",

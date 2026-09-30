@@ -19,7 +19,7 @@ test("signs requests like OKX expects (reference value from Python hmac)", () =>
 
 test("a route within the impact cap passes; negative impact is read as its size", () => {
   const body = { code: "0", data: [{ toTokenAmount: "123", priceImpactPercent: "-4.2" }] };
-  assert.deepEqual(verdictFromQuote(body, "STRICT"), { status: "pass", impactPercent: 4.2, reason: "impact 4.2%" });
+  assert.deepEqual(verdictFromQuote(body, "STRICT"), { status: "pass", impactPercent: 4.2, reason: "impact 4.2%", amountOut: "123" });
 });
 
 test("impact over the cap is skipped for Strict but can pass Low-Cap", () => {

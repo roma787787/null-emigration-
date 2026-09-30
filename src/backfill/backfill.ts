@@ -15,7 +15,7 @@ import { logger } from "../utils/logger.js";
  * sent to chats, stored as a detection, or counted in /status.
  */
 
-export type BackfillDecision = "alert" | "liquidity" | "swap-bot" | "unchecked" | "duplicate";
+export type BackfillDecision = "alert" | "liquidity" | "swap-bot" | "stablecoin" | "unchecked" | "duplicate";
 
 export interface BackfillCandidate {
   blockNumber: bigint;
@@ -145,6 +145,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRep
         verdict.kind === "pass" ? "alert"
         : verdict.kind === "unchecked" ? "unchecked"
         : verdict.reason === "liquidity" ? "liquidity"
+        : verdict.reason === "stablecoin converter" ? "stablecoin"
         : "swap-bot";
       if (decision === "alert" || decision === "unchecked") {
         for (const k of keys) if (!seenKeys.has(k)) seenKeys.set(k, event.contractAddress);
@@ -236,7 +237,7 @@ export function backfillCsv(report: BackfillReport): string {
 
 /** Counts per decision, e.g. { alert: 3, liquidity: 41, duplicate: 12 }. */
 export function decisionCounts(report: BackfillReport): Record<BackfillDecision, number> {
-  const counts: Record<BackfillDecision, number> = { alert: 0, liquidity: 0, "swap-bot": 0, unchecked: 0, duplicate: 0 };
+  const counts: Record<BackfillDecision, number> = { alert: 0, liquidity: 0, "swap-bot": 0, stablecoin: 0, unchecked: 0, duplicate: 0 };
   for (const c of report.candidates) counts[c.decision]++;
   return counts;
 }

@@ -183,8 +183,12 @@ find migrations. For every block on every enabled network:
    `calldata`. `off` = direct deployments only.
 2. **Signature gate** — kept only if the dispatcher has a `migrate*` /
    `convert*` action (not settings/flags that merely mention it —
-   `setMigratedPool`, `migratedPools`, `isConverted` — nor ERC-4626's
-   `convertToShares`/`convertToAssets`), an `oldToken()`-style getter (`oldToken`,
+   `setMigratedPool`, `migratedPools`, `isConverted` — nor nouns and
+   constants like `converter()` (Ondo's tokenized-stock wrappers) or
+   `CONVERT_MAX_BPS()`, zero-argument views like `convertStep()`, ERC-4626's
+   `convertToShares`/`convertToAssets`, or position moves between a
+   protocol's own contracts — `migrateStake`, `migrateLiquidity`,
+   `migratePosition`, `migrateLoan*`, `migrateVault`…), an `oldToken()`-style getter (`oldToken`,
    `legacyToken`, `previousToken`, `v1Token`…; not `tokenIn`/`fromToken`,
    which every swap bot has), or an `xToY` converter whose x and y are its own
    token getters. `swap*`/`exchange*` alone never qualify — bots, zaps and
@@ -193,7 +197,8 @@ find migrations. For every block on every enabled network:
    Token B has no DEX market yet (a new token; a bot trades two liquid ones).
    A candidate also needs a Token B (address, or ticker → Unverified); one
    without is re-checked later. Spam shapes are dropped here: DEX pools (`token0()`/`token1()`),
-   ERC-4626 vaults (`asset()` + `totalAssets()` + `convertTo*` — even with a `migrate()`),
+   ERC-4626 vaults (`asset()` + `totalAssets()` + `convertTo*`, or both
+   `convertToShares` and `convertToAssets` — even with a `migrate()`),
    trading / flash-loan bots (`uniswapV3SwapCallback`, `uniswapV2Call`,
    `executeOperation`, `receiveFlashLoan`, `onFlashLoan`…), launchpad
    (four.meme-style) tokens with pool-graduation settings (`setMigratedPool`,
@@ -221,7 +226,9 @@ find migrations. For every block on every enabled network:
    **Deep** ($10,000 / ≤ 3% — only tokens with a pool of roughly $300k+),
    chosen per chat in `/settings`; each is tunable with
    `LIQUIDITY_<LEVEL>=<usd>:<max impact %>` (e.g. `LIQUIDITY_DEEP=25000:2`). No route / too much impact / honeypot =
-   dropped. Results are cached per token for 5 minutes; an OKX outage is
+   dropped. So is a converter whose Token A is itself worth a dollar (the
+   quote returns ~1:1 — RLUSD → PYUSD, crvUSD ↔ reUSD): swapping one
+   stablecoin for another is not a token migration. Results are cached per token for 5 minutes; an OKX outage is
    retried rather than cached.
 5. **Dedup** — the same token pair, or the same contract code (clones, bot
    fleets), alerts once per `AUTO_DEDUP_HOURS` (default 24) — only alerts count: a clone dropped for having no market doesn't block a later one whose token trades.
