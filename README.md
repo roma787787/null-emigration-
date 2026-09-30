@@ -347,8 +347,12 @@ broadcast), followed by what auto-discovery would do with it — pass its
 filters, or the reason it would be dropped — and the block it was deployed
 in (to tell "deployed before the backfill window" from "missed"). The
 contract's address is enough: the bot finds the deploying transaction through
-the Etherscan API (`ETHERSCAN_API_KEY`); or give that transaction's hash, from
-the "Contract Creator" field of the contract's explorer page. Token A is the
+the Etherscan API (`ETHERSCAN_API_KEY`) or, where that doesn't answer (free
+keys don't cover every network), on-chain — bisecting `eth_getCode` for the
+block where the code appeared (~26 calls; needs an archive RPC such as
+Alchemy), then the transaction in it that created the contract, factory calls
+included. Or give that transaction's hash, from the "Contract Creator" field
+of the contract's explorer page. Token A is the
 optional third argument, else a tracked token owned by the creator,
 preferring one the contract references. It's the zero-cost way to check
 detection against real migration contracts.

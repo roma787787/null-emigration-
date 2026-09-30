@@ -13,7 +13,7 @@ import { t, DEFAULT_LANGUAGE } from "../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 import { analyzeAutoCandidate } from "../../analyzer/autoAnalyzer.js";
 import { checkLiquidityLevels } from "../../liquidity/okxLiquidity.js";
-import { getContractCreation } from "../../chain/ownerDiscovery.js";
+import { findDeployTx } from "../../chain/creationLookup.js";
 
 function isTxHash(value: string): value is Hex {
   return isHex(value) && value.length === 66;
@@ -41,8 +41,8 @@ async function tokenACandidates(network: NetworkKey, explicit: Address | null, c
 /**
  * /analyze <network> <deploy_tx_hash | contract_address> [token_a_address] —
  * runs the migration analyzer on contracts created by an already-mined
- * transaction (found through the explorer API when given the contract's
- * address) and replies with the same card a live detection would produce,
+ * transaction (when given the contract's address, found through the
+ * explorer API, else on-chain) and replies with the same card a live detection would produce,
  * plus what auto-discovery would have done with it and in which block.
  * Nothing is stored or broadcast; it's for checking real-world contracts on
  * demand.
@@ -83,15 +83,13 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
       hash = hashArg;
     } else {
       onlyContract = getAddress(hashArg);
-      const creation = await getContractCreation(network, onlyContract).catch((err) => {
-        logger.warn({ err, network, contract: onlyContract }, "/analyze: creation lookup failed");
-        return null;
-      });
-      if (!creation) {
+      await ctx.reply(t(lang, "analyze.lookingUp", { address: onlyContract, network }));
+      const found = await findDeployTx(network, onlyContract);
+      if (!found) {
         await ctx.reply(t(lang, "analyze.creationUnknown", { address: onlyContract, network }));
         return;
       }
-      hash = creation.txHash;
+      hash = found;
     }
     await ctx.reply(t(lang, "analyze.working", { hash, network }));
 

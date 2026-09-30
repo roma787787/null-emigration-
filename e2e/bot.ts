@@ -419,9 +419,34 @@ check(
     textsTo(r, ALICE).some(autoLine),
   textsTo(r, ALICE),
 );
-r = await send(ALICE, `/analyze anvil ${oldToken.address}`);
+r = await send(ALICE, `/analyze anvil ${analyzed.address}`);
 check(
-  "/analyze <address> the explorer doesn't know asks for the deploy hash instead",
+  "/analyze <address> the explorer doesn't know finds the deploy on-chain (block where the code appeared)",
+  has(textsTo(r, ALICE), new RegExp(`${analyzed.hash}`)) && has(textsTo(r, ALICE), /АНАЛІЗ КОНТРАКТУ/) && textsTo(r, ALICE).some((m) => m.includes(`блоці ${analyzed.blockNumber}`)),
+  textsTo(r, ALICE),
+);
+{
+  // Through a factory (CREATE2): the creating transaction is a call, not a deploy.
+  const factory = await deploy(strangerWallet, "MigratorFactory");
+  const salt = `0x${"42".repeat(32)}` as Hex;
+  const { result: made } = await chainClient.simulateContract({
+    account: strangerWallet.account, address: factory.address, abi: artifacts.MigratorFactory!.abi as Abi,
+    functionName: "deploy", args: [newToken.address, oldToken.address, salt],
+  });
+  const callHash = await strangerWallet.writeContract({
+    address: factory.address, abi: artifacts.MigratorFactory!.abi as Abi, functionName: "deploy", args: [newToken.address, oldToken.address, salt],
+  } as never);
+  await chainClient.waitForTransactionReceipt({ hash: callHash });
+  r = await send(ALICE, `/analyze anvil ${made as string}`);
+  check(
+    "/analyze <address> of a factory-made (CREATE2) contract finds the factory call that created it",
+    has(textsTo(r, ALICE), new RegExp(`${callHash}`)) && has(textsTo(r, ALICE), new RegExp(`${String(made).toLowerCase()}`, "i")),
+    textsTo(r, ALICE),
+  );
+}
+r = await send(ALICE, "/analyze anvil 0x000000000000000000000000000000000000dEaD");
+check(
+  "/analyze <address> with no contract behind it says so and asks for the deploy hash",
   has(textsTo(r, ALICE), /Не вдалося знайти транзакцію[\s\S]*at txn/),
   textsTo(r, ALICE),
 );
