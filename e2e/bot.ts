@@ -574,6 +574,10 @@ r = await send(ADMIN, "/backfill_stop");
 check("/backfill_stop with nothing running says so", has(textsTo(r, ADMIN), /No backfill is running/), textsTo(r, ADMIN));
 {
   const mark = calls.length;
+  r = await send(ADMIN, "/backfill anvil 01.01.2026-02.01.2026");
+  check("/backfill with dates before the chain began says there are no blocks", has(textsTo(r, ADMIN), /No anvil blocks in that period/), textsTo(r, ADMIN));
+  r = await send(ADMIN, "/backfill anvil 10.09-01.09");
+  check("/backfill with a backwards date range explains the formats", has(textsTo(r, ADMIN), /01\.09-10\.09/), textsTo(r, ADMIN));
   r = await send(ADMIN, "/backfill anvil 50");
   check("/backfill anvil 50 starts in the background and says what it will scan", has(textsTo(r, ADMIN), /Backfill started: anvil, blocks \d+–\d+ \(50 blocks/), textsTo(r, ADMIN));
   const until = Date.now() + 90_000;

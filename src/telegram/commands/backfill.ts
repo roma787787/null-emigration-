@@ -11,9 +11,48 @@ import { logger } from "../../utils/logger.js";
 const MAX_DAYS = 31;
 const ALERTS_LISTED = 15;
 
-/** "7d" → 7 days, "12h" → 12 hours, "5000" → the last 5,000 blocks. */
-export function parseBackfillRange(value: string): { seconds: number } | { blocks: number } | null {
-  const match = /^(\d+)([dh]?)$/i.exec(value.trim());
+export type BackfillRange =
+  | { seconds: number }
+  | { blocks: number }
+  /** Calendar dates (UTC): from the start of the first day to the end of the last. */
+  | { fromSec: number; toSec: number };
+
+const DAY = /^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$/;
+
+/** "05.09" or "05.09.2026" → that day's 00:00 UTC; without a year, the latest such day not in the future. */
+function parseDay(value: string, now: Date): number | null {
+  const m = DAY.exec(value);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const at = (year: number) => {
+    const t = Date.UTC(year, month - 1, day);
+    const d = new Date(t);
+    return d.getUTCDate() === day && d.getUTCMonth() === month - 1 ? t : null;
+  };
+  if (m[3]) return at(Number(m[3]));
+  const thisYear = at(now.getUTCFullYear());
+  if (thisYear === null) return null;
+  return thisYear <= now.getTime() ? thisYear : at(now.getUTCFullYear() - 1);
+}
+
+/**
+ * "7d" → 7 days, "12h" → 12 hours, "5000" → the last 5,000 blocks,
+ * "01.09-10.09" (or "01.09.2026-10.09.2026", or one day "05.09") → those
+ * calendar days, UTC, the last one included.
+ */
+export function parseBackfillRange(value: string, now = new Date()): BackfillRange | null {
+  const text = value.trim();
+  const dates = /^([\d.]+?)(?:-([\d.]+))?$/.exec(text);
+  if (dates && text.includes(".")) {
+    const from = parseDay(dates[1]!, now);
+    const lastDay = dates[2] ? parseDay(dates[2], now) : from;
+    if (from === null || lastDay === null || lastDay < from) return null;
+    if (from > now.getTime()) return null;
+    if ((lastDay - from) / 86_400_000 + 1 > MAX_DAYS) return null;
+    return { fromSec: from / 1000, toSec: Math.min(lastDay + 86_400_000, now.getTime()) / 1000 };
+  }
+  const match = /^(\d+)([dh]?)$/i.exec(text);
   if (!match) return null;
   const n = Number(match[1]);
   if (!(n > 0)) return null;
@@ -102,15 +141,22 @@ export function registerBackfillCommands(bot: Telegraf): void {
     let toBlock: bigint;
     try {
       toBlock = await getPublicClient(network).getBlockNumber({ cacheTime: 0 });
-      fromBlock =
-        "blocks" in range
-          ? (toBlock - BigInt(range.blocks) + 1n > 0n ? toBlock - BigInt(range.blocks) + 1n : 0n)
-          : await blockAtTime(network, Math.floor(Date.now() / 1000) - range.seconds);
+      if ("blocks" in range) {
+        fromBlock = toBlock - BigInt(range.blocks) + 1n > 0n ? toBlock - BigInt(range.blocks) + 1n : 0n;
+      } else if ("seconds" in range) {
+        fromBlock = await blockAtTime(network, Math.floor(Date.now() / 1000) - range.seconds);
+      } else {
+        fromBlock = await blockAtTime(network, range.fromSec);
+        // The last block before the day after the range (the head, for a range up to now).
+        const after = await blockAtTime(network, range.toSec);
+        if (after < toBlock) toBlock = after - 1n;
+      }
     } catch (err) {
       logger.warn({ err, network }, "Backfill: could not resolve the block range");
       return void (await ctx.reply(t(lang, "backfill.rpcError", { network })));
     }
 
+    if (toBlock < fromBlock) return void (await ctx.reply(t(lang, "backfill.noBlocks", { network })));
     const total = Number(toBlock - fromBlock + 1n);
     const speed = blocksPerSec();
     const controller = new AbortController();

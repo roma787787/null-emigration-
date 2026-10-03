@@ -331,8 +331,9 @@ on that RPC, plus blocks skipped after a long downtime, blocks that failed
 every retry, and the last RPC error. Also totals (tokens, wallets, detected
 contracts) and the analysis queue, including scheduled re-checks.
 
-`/backfill ethereum 7d` (also `12h`, or `5000` for the last 5,000 blocks; up
-to 31 days) runs past blocks through exactly the live pipeline — contract
+`/backfill ethereum 7d` (also `12h`, `5000` for the last 5,000 blocks, or
+calendar days `01.09-10.09` / `01.09.2026-10.09.2026` / `05.09`, UTC, both
+days included; up to 31 days) runs past blocks through exactly the live pipeline — contract
 discovery, analysis, filters, dedup, the OKX test — in the background, at
 most `BACKFILL_BLOCKS_PER_SEC` (default 10, so the live bot keeps its RPC
 share), fetching `BACKFILL_PARALLEL_BLOCKS` blocks at once (default 8, max
