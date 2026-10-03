@@ -23,7 +23,7 @@ export interface NetworkConfig {
   chain: Chain;
   /** Declared via EXTRA_NETWORKS rather than built in. */
   custom: boolean;
-  /** Public fallback RPCs used only when no RPC_<NETWORK> env var is set. Replace with paid endpoints in production. */
+  /** Free, keyless public RPCs (failover in order) used only when no RPC_<NETWORK> env var is set: no block tracing or archive history, so factory deployments, /backfill and /analyze <address> work best on a paid endpoint. */
   defaultRpcUrls: string[];
   explorerAddressUrl: (address: string) => string;
   explorerTxUrl: (txHash: string) => string;
@@ -45,70 +45,70 @@ const BUILTIN_SPECS: Record<string, NetworkSpec> = {
     chain: mainnet,
     explorerBaseUrl: "https://etherscan.io",
     dexscreenerSlug: "ethereum",
-    defaultRpcUrls: ["https://eth.llamarpc.com", "https://rpc.ankr.com/eth"],
+    defaultRpcUrls: ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
   },
   bsc: {
     label: "BNB Smart Chain",
     chain: bsc,
     explorerBaseUrl: "https://bscscan.com",
     dexscreenerSlug: "bsc",
-    defaultRpcUrls: ["https://bsc-dataseed.binance.org", "https://rpc.ankr.com/bsc"],
+    defaultRpcUrls: ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"],
   },
   arbitrum: {
     label: "Arbitrum One",
     chain: arbitrum,
     explorerBaseUrl: "https://arbiscan.io",
     dexscreenerSlug: "arbitrum",
-    defaultRpcUrls: ["https://arb1.arbitrum.io/rpc", "https://rpc.ankr.com/arbitrum"],
+    defaultRpcUrls: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
   },
   base: {
     label: "Base",
     chain: base,
     explorerBaseUrl: "https://basescan.org",
     dexscreenerSlug: "base",
-    defaultRpcUrls: ["https://mainnet.base.org", "https://rpc.ankr.com/base"],
+    defaultRpcUrls: ["https://base-rpc.publicnode.com", "https://mainnet.base.org"],
   },
   optimism: {
     label: "Optimism",
     chain: optimism,
     explorerBaseUrl: "https://optimistic.etherscan.io",
     dexscreenerSlug: "optimism",
-    defaultRpcUrls: ["https://mainnet.optimism.io", "https://rpc.ankr.com/optimism"],
+    defaultRpcUrls: ["https://optimism-rpc.publicnode.com", "https://mainnet.optimism.io"],
   },
   polygon: {
     label: "Polygon",
     chain: polygon,
     explorerBaseUrl: "https://polygonscan.com",
     dexscreenerSlug: "polygon",
-    defaultRpcUrls: ["https://polygon-rpc.com", "https://rpc.ankr.com/polygon"],
+    defaultRpcUrls: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
   },
   avalanche: {
     label: "Avalanche C-Chain",
     chain: avalanche,
     explorerBaseUrl: "https://snowtrace.io",
     dexscreenerSlug: "avalanche",
-    defaultRpcUrls: ["https://api.avax.network/ext/bc/C/rpc", "https://rpc.ankr.com/avalanche"],
+    defaultRpcUrls: ["https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc"],
   },
   linea: {
     label: "Linea",
     chain: linea,
     explorerBaseUrl: "https://lineascan.build",
     dexscreenerSlug: "linea",
-    defaultRpcUrls: ["https://rpc.linea.build"],
+    defaultRpcUrls: ["https://linea-rpc.publicnode.com", "https://rpc.linea.build"],
   },
   scroll: {
     label: "Scroll",
     chain: scroll,
     explorerBaseUrl: "https://scrollscan.com",
     dexscreenerSlug: "scroll",
-    defaultRpcUrls: ["https://rpc.scroll.io"],
+    defaultRpcUrls: ["https://scroll-rpc.publicnode.com", "https://rpc.scroll.io"],
   },
   blast: {
     label: "Blast",
     chain: blast,
     explorerBaseUrl: "https://blastscan.io",
     dexscreenerSlug: "blast",
-    defaultRpcUrls: ["https://rpc.blast.io"],
+    defaultRpcUrls: ["https://blast-rpc.publicnode.com", "https://rpc.blast.io"],
   },
   "polygon-zkevm": {
     label: "Polygon zkEVM",
