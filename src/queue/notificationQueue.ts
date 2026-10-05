@@ -16,6 +16,7 @@ import { getPublicClient } from "../chain/provider.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
 import { findDeployBlock } from "../chain/creationLookup.js";
+import { termsFor } from "../analyzer/migrationTerms.js";
 import { isAddressEqual, type Address } from "viem";
 
 const QUEUE_NAME = "contract-creation-events";
@@ -127,8 +128,16 @@ async function handleRecheck(data: RecheckJobData, onAnalyzed: (result: Analyzed
   );
 
   if (outcome !== "unchanged") {
-    const updated = await migrationContractRepository.updateAnalysis(previous.id, analysis);
-    if (updated && outcome === "notify") await onAnalyzed({ token, migrationContract: updated, update: true });
+    let updated = await migrationContractRepository.updateAnalysis(previous.id, analysis);
+    if (updated && outcome === "notify") {
+      // Token B is known now: so are the funding and its price.
+      const terms = await termsFor(data.network, data.contractAddress, tokenA, updated.tokenBAddress, previous.liquidity?.LOW_CAP);
+      if (terms) {
+        await migrationContractRepository.setTerms(updated.id, terms);
+        updated = { ...updated, terms };
+      }
+      await onAnalyzed({ token, migrationContract: updated, update: true });
+    }
   }
   if (!analysis.tokenBAddress) {
     await scheduleRecheck({ network: data.network, contractAddress: data.contractAddress, input: data.input }, data.attempt + 1);
@@ -193,6 +202,7 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
         matchedGetter: analysis.matchedGetter,
         txHash: data.txHash,
         blockNumber: BigInt(data.blockNumber),
+        terms: await termsFor(data.network, data.contractAddress, token.address, analysis.tokenBAddress),
       });
 
       if (!migrationContract) {
@@ -467,6 +477,7 @@ export function startAutoDiscoveryWorker(
         creatorAddress: data.creatorAddress,
         txHash: data.txHash,
         blockNumber: BigInt(data.blockNumber),
+        terms: await termsFor(data.network, data.contractAddress, result.tokenAAddress, result.tokenBAddress, liquidity?.LOW_CAP),
       });
       if (!migrationContract) return;
 

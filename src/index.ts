@@ -3,6 +3,7 @@ import { enabledNetworks, isKnownNetwork, networkConfigErrors, unknownEnabledNet
 import { runMigrations } from "./db/migrate.js";
 import { startBlockListener, type UntrackedCreationHandler } from "./chain/blockListener.js";
 import { startCustodianWatcher } from "./chain/custodianWatcher.js";
+import { openWatchOptionsFromEnv, startMigrationOpenWatcher } from "./chain/migrationOpenWatcher.js";
 import {
   enqueueAutoCandidate,
   enqueueContractCreation,
@@ -15,7 +16,7 @@ import { autoDiscoveryMode } from "./config/autoMode.js";
 import { planWatch } from "./config/watchPlan.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
 import { okxHealthSnapshot } from "./liquidity/okxLiquidity.js";
-import { createBot, broadcastListings, broadcastMigrationAlert, notifyNewOwners } from "./telegram/bot.js";
+import { createBot, broadcastListings, broadcastMigrationAlert, broadcastMigrationOpened, notifyNewOwners } from "./telegram/bot.js";
 import { ListingBatcher } from "./rwa/listings.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
 import { logger } from "./utils/logger.js";
@@ -109,6 +110,18 @@ async function main() {
       stopListeners.push(startCustodianWatcher(network, enqueueAuto(network)));
     } catch (err) {
       logger.error({ err, network }, "Failed to start custodian watch for network");
+    }
+  }
+
+  // "Migration opened": the first exchange through each alerted contract.
+  if (process.env.MIGRATION_OPEN_WATCH !== "off") {
+    const options = openWatchOptionsFromEnv();
+    for (const network of new Set([...enabledNetworks(), ...custodianNetworks])) {
+      try {
+        stopListeners.push(startMigrationOpenWatcher(network, (record) => broadcastMigrationOpened(bot, record), options));
+      } catch (err) {
+        logger.error({ err, network }, "Failed to start migration-opened watch for network");
+      }
     }
   }
 

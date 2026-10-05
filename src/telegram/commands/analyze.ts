@@ -14,6 +14,7 @@ import { logger } from "../../utils/logger.js";
 import { analyzeAutoCandidate } from "../../analyzer/autoAnalyzer.js";
 import { applyLiquidityRules, type LiquidityDecision } from "../../queue/notificationQueue.js";
 import { findDeployTx } from "../../chain/creationLookup.js";
+import { termsFor } from "../../analyzer/migrationTerms.js";
 
 function isTxHash(value: string): value is Hex {
   return isHex(value) && value.length === 66;
@@ -148,6 +149,10 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
           const { alternateTokenA: _alt, tokenAGetter: _getter, codeHash: _code, swapOnly: _swapOnly, ...autoFields } = verdict.result;
           record = { ...record, ...autoFields, discovery: "auto", liquidity: verdict.liquidity };
         }
+        record = {
+          ...record,
+          terms: await termsFor(network, contractAddress, record.tokenAAddress, record.tokenBAddress, verdict?.liquidity?.LOW_CAP),
+        };
         await ctx.reply(formatMigrationAlert(tokenA, record, lang, { manual: true }), {
           parse_mode: "MarkdownV2",
           link_preview_options: { is_disabled: true },

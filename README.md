@@ -241,6 +241,21 @@ find migrations. For every block on every enabled network:
 6. **Alert** to every approved chat that has auto alerts on and whose level
    the token passes. The card shows the source (auto-discovery), Token A's
    full address, and the test swaps (`$1,000 → 0.80% ✅ · $300 → 0.20% ✅`).
+   It also shows the **migration terms**, read from the contract where it
+   exposes them: status (open / opens `<date>` / paused / ended, from
+   `startTime()`, `paused()`, `isActive()`-style getters), the deadline
+   (`endTime()`, `deadline()`…), the ratio (`ratio()`, `rate()`,
+   `LEND_AAVE_RATIO()`… — raw, its meaning varies), the new tokens already on
+   the contract or "minted on exchange", and both tokens' USD prices from the
+   $300 OKX quotes with the buy-old/migrate/sell-new spread at 1:1.
+7. **"Migration opened"** — a second card on the first exchange through an
+   alerted contract: the old token sent into it, the new token sent out of it
+   (or minted by it), or one of its migration events. Found from logs every
+   `OPEN_WATCH_INTERVAL_MS` (default 60 s), so it needs no tracing; watched
+   for `OPEN_WATCH_DAYS` (default 30) after the alert, only for alerts since
+   this watch exists. The card links the first transaction, says how long
+   after the first alert it came, and repeats fresh prices and the spread.
+   `MIGRATION_OPEN_WATCH=off` turns it off.
 
 **RWA / tokenized stocks.** `isin()`, `cusip()`, `underlyingAsset()` and
 `issuer()` getters are recognised and shown on the card. Deployers of

@@ -1,4 +1,4 @@
-import type { Language, MigrationContractRecord, StoredLiquidityCheck, TokenRecord } from "../types/index.js";
+import type { Language, MigrationContractRecord, MigrationTerms, StoredLiquidityCheck, TokenRecord } from "../types/index.js";
 import { getNetwork } from "../config/networks.js";
 import { t } from "./i18n/index.js";
 
@@ -70,6 +70,65 @@ function liquidityLine(lang: Language, migration: MigrationContractRecord): stri
     return `💧 ${label}: _${escapeMd(t(lang, "card.liquidityUnchecked", { reason: present[0]?.reason ?? "" }))}_`;
   }
   return `💧 ${label}: ${escapeMd(present.map(formatImpact).join(" · "))}`;
+}
+
+/** "24.09.2026 14:00 UTC" */
+export function formatUtc(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getUTCDate())}.${p(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
+}
+
+/** "$0.002135", "$1.23", "$1,234" — enough digits to compare two close prices, never exponent notation. */
+export function formatUsd(value: number): string {
+  if (value >= 1000) return `$${Math.round(value).toLocaleString("en-US")}`;
+  if (value >= 1) return `$${value.toFixed(2)}`;
+  const digits = Math.min(12, Math.max(4, Math.ceil(-Math.log10(value)) + 3));
+  return `$${value.toFixed(digits)}`;
+}
+
+export function formatSpread(percent: number): string {
+  return `${percent >= 0 ? "+" : "−"}${Math.abs(percent).toFixed(1)}%`;
+}
+
+/** The "💱 Prices: old $0.0021 · new $0.0022 · spread +4.8% at 1:1" line, or null without a single price. */
+export function pricesLine(lang: Language, terms: MigrationTerms | null | undefined): string | null {
+  const prices = terms?.prices;
+  if (!prices) return null;
+  const price = (v: number | null) => (v === null ? t(lang, "card.noMarket") : formatUsd(v));
+  const parts = [`${t(lang, "card.priceOld")} ${price(prices.oldUsd)}`, `${t(lang, "card.priceNew")} ${price(prices.newUsd)}`];
+  if (prices.spreadPercent !== null) {
+    parts.push(t(lang, "card.spread", { spread: formatSpread(prices.spreadPercent) }) + (terms?.ratio ? ` (${t(lang, "card.spreadCheckRatio")})` : ""));
+  }
+  return `💱 ${escapeMd(t(lang, "card.prices"))}: ${escapeMd(parts.join(" · "))}`;
+}
+
+/** Status, deadline, ratio and funding lines — what the contract says about acting on it. */
+export function termsLines(lang: Language, terms: MigrationTerms | null | undefined): string[] {
+  if (!terms) return [];
+  const lines: string[] = [];
+  const status =
+    terms.status === "open" ? t(lang, "card.statusOpen")
+    : terms.status === "paused" ? t(lang, "card.statusPaused")
+    : terms.status === "ended" ? t(lang, "card.statusEnded")
+    : terms.status === "not_started"
+      ? terms.startsAt !== null ? t(lang, "card.statusNotStartedAt", { date: formatUtc(terms.startsAt) }) : t(lang, "card.statusNotStarted")
+      : t(lang, "card.statusUnknown");
+  lines.push(`⏳ ${escapeMd(t(lang, "card.statusLabel"))}: ${escapeMd(status)}`);
+  if (terms.endsAt !== null) lines.push(`📅 ${escapeMd(t(lang, "card.deadline"))}: ${escapeMd(formatUtc(terms.endsAt))}`);
+  if (terms.ratio) {
+    lines.push(`🔁 ${escapeMd(t(lang, "card.ratio"))}: ${escapeMd(`${terms.ratio.getter} = ${terms.ratio.value}`)} _\\(${escapeMd(t(lang, "card.ratioNote"))}\\)_`);
+  }
+  if (terms.funding) {
+    const funding =
+      terms.funding.kind === "mint" ? t(lang, "card.fundingMint")
+      : terms.funding.empty ? t(lang, "card.fundingEmpty")
+      : t(lang, "card.fundingBalance", { amount: terms.funding.amount, symbol: terms.funding.symbol ?? "" }).replace(/\s{2,}/g, " ");
+    lines.push(`🏦 ${escapeMd(t(lang, "card.funding"))}: ${escapeMd(funding)}`);
+  }
+  const prices = pricesLine(lang, terms);
+  if (prices) lines.push(prices);
+  return lines;
 }
 
 interface FormatOptions {
@@ -146,6 +205,8 @@ export function formatMigrationAlert(
   const liquidity = liquidityLine(lang, migration);
   if (liquidity) extras.push(liquidity);
   if (migration.rwaSignals.length > 0) extras.push(`🏦 RWA: ${escapeMd(migration.rwaSignals.join(", "))}`);
+  const terms = termsLines(lang, migration.terms);
+  if (terms.length > 0) extras.push("", ...terms);
 
   return [
     title,
@@ -164,6 +225,52 @@ export function formatMigrationAlert(
     `📊 ${escapeMd(t(lang, "card.analysisStatus"))}: ${confidenceEmoji} *${migration.confidence} ${escapeMd(t(lang, "card.confidenceWord"))}* \\(${migration.confidenceScore}%\\)`,
     `⚡️ ${escapeMd(t(lang, "card.foundSignals"))}: ${signalsLine}`,
     ...extras,
+    "",
+    `🔗 ${escapeMd(t(lang, "card.links"))}`,
+    links.join(" \\| "),
+  ].join("\n");
+}
+
+/**
+ * The second card: the first exchange went through the contract. Tokens,
+ * the transaction, how long after the first alert, and fresh prices/spread.
+ */
+export function formatMigrationOpened(migration: MigrationContractRecord, lang: Language, now = new Date()): string {
+  const network = getNetwork(migration.network);
+  const tokenA = migration.tokenAAddress
+    ? `${escapeMd(migration.tokenASymbol ?? "UNKNOWN")} · ${escapeMd(migration.tokenAAddress)}`
+    : `_${escapeMd(t(lang, "card.tokenAUnknown"))}_`;
+  const tokenB = migration.tokenBAddress
+    ? escapeMd(migration.tokenBAddress)
+    : migration.tokenBSymbolUnverified
+      ? `⚠️ *Unverified*: ${escapeMd(migration.tokenBSymbolUnverified)}`
+      : `_${escapeMd(t(lang, "card.notSetYet"))}_`;
+  const minutes = Math.max(0, Math.round((now.getTime() - migration.detectedAt.getTime()) / 60_000));
+  const hours = Math.round(minutes / 60);
+  const after =
+    hours >= 48 ? t(lang, "opened.after", { days: String(Math.round(hours / 24)) })
+    : minutes >= 60 ? t(lang, "opened.afterHours", { hours: String(hours) })
+    : t(lang, "opened.afterMinutes", { minutes: String(minutes) });
+  const tx = migration.openedTx
+    ? `[${escapeMd(shorten(migration.openedTx))}](${network.explorerTxUrl(migration.openedTx)}) · ${escapeMd(after)}`
+    : escapeMd(after);
+
+  const links = [`[Block Explorer Contract](${network.explorerAddressUrl(migration.contractAddress)})`];
+  if (migration.tokenAAddress) links.push(`[DexScreener Token A](${network.dexscreenerTokenUrl(migration.tokenAAddress)})`);
+  if (migration.tokenBAddress) links.push(`[DexScreener Token B](${network.dexscreenerTokenUrl(migration.tokenBAddress)})`);
+
+  const terms = migration.terms ? termsLines(lang, { ...migration.terms, status: "open" }).slice(1) : [];
+
+  return [
+    `🟢 *${escapeMd(t(lang, "opened.title"))}* 🟢`,
+    `_${escapeMd(t(lang, "opened.note"))}_`,
+    "",
+    `📍 ${escapeMd(t(lang, "card.network"))}: ${escapeMd(network.label)}`,
+    `🪙 ${escapeMd(t(lang, "card.tokenA"))}: ${tokenA}`,
+    `🎯 ${escapeMd(t(lang, "card.targetToken"))} ${tokenB}`,
+    `📄 ${escapeMd(t(lang, "card.contract"))} ${escapeMd(migration.contractAddress)}`,
+    `🧾 ${escapeMd(t(lang, "opened.firstTx"))}: ${tx}`,
+    ...(terms.length > 0 ? ["", ...terms] : []),
     "",
     `🔗 ${escapeMd(t(lang, "card.links"))}`,
     links.join(" \\| "),

@@ -45,6 +45,21 @@ export interface StoredLiquidityCheck {
   reason: string;
 }
 
+/** What a trader needs to act on a migration, read from the contract (see analyzer/migrationTerms.ts). */
+export interface MigrationTerms {
+  /** open: exchanges can happen now; not_started: before its start time or not yet enabled. */
+  status: "open" | "paused" | "not_started" | "ended" | "unknown";
+  /** Unix seconds, when the contract holds them. */
+  startsAt: number | null;
+  endsAt: number | null;
+  /** A ratio/rate getter's raw value — its meaning (old per new, scaled…) varies by contract. */
+  ratio: { getter: string; value: string } | null;
+  /** New tokens already on the contract to hand out, or minted on exchange (the contract is the new token). */
+  funding: { kind: "balance"; amount: string; empty: boolean; symbol: string | null } | { kind: "mint" } | null;
+  /** USD per whole token from $300 test swaps, and buy-old/migrate/sell-new at 1:1 in percent. */
+  prices: { oldUsd: number | null; newUsd: number | null; spreadPercent: number | null; at: number } | null;
+}
+
 export interface MigrationContractRecord {
   id: number;
   /** The tracked token it belongs to; null for auto-discovered contracts. */
@@ -72,6 +87,11 @@ export interface MigrationContractRecord {
   txHash: `0x${string}`;
   blockNumber: bigint;
   detectedAt: Date;
+  /** Read at detection; null for detections stored before terms existed or when nothing could be read. */
+  terms?: MigrationTerms | null;
+  /** When the first exchange through the contract was seen (the "migration opened" alert), and its transaction. */
+  openedAt?: Date | null;
+  openedTx?: `0x${string}` | null;
 }
 
 export interface ChatSettingsRecord {

@@ -57,7 +57,7 @@ await new Promise<void>((r) => sigDb.listen(8547, "127.0.0.1", r));
 process.env.SIGNATURE_DB_URL = "http://127.0.0.1:8547/signature-database/v1/lookup";
 
 // --- OKX DEX API stub: per Token A, the price impact for $300 and $1,000 ------------
-type Impacts = { low: number; strict: number; deep?: number; dollar?: boolean };
+type Impacts = { low: number; strict: number; deep?: number; dollar?: boolean; price?: number };
 type Market = Impacts | "noroute" | { failFirst: number; then: Impacts };
 const markets = new Map<string, Market>();
 const okxRequests = new Map<string, number>();
@@ -81,7 +81,10 @@ const okx = createServer((req, res) => {
   // $300 → low, $1,000 → strict, $10,000 → deep (default: 3× the $1,000 impact).
   const impact = amount >= 10000n * 10n ** 18n ? (market.deep ?? market.strict * 3) : amount >= 1000n * 10n ** 18n ? market.strict : market.low;
   // A dollar token: $N buys N of it (same raw amount: the test stable and the token both have 18 decimals).
-  const toTokenAmount = market.dollar ? amount.toString() : "1000";
+  // A priced token: $N buys N / price of it (18 decimals on both sides).
+  const toTokenAmount = market.dollar
+    ? amount.toString()
+    : market.price ? (amount * 1_000_000n / BigInt(Math.round(market.price * 1e6))).toString() : "1000";
   res.end(JSON.stringify({ code: "0", msg: "", data: [{ toTokenAmount, priceImpactPercent: String(-impact) }] }));
 });
 await new Promise<void>((r) => okx.listen(8549, "127.0.0.1", r));
@@ -533,6 +536,96 @@ const cardProblems = [...alerts.values()].flatMap(({ record }) =>
 check(`all ${alerts.size} cards (auto, custodian, Unverified, tracked) are valid MarkdownV2 in 3 languages`, cardProblems.length === 0, cardProblems);
 if (firstRec) console.log("\n=== SAMPLE AUTO CARD (uk) ===\n" + formatMigrationAlert(null, firstRec, "uk"));
 if (rwaRec) console.log("\n=== SAMPLE CUSTODIAN CARD (en) ===\n" + formatMigrationAlert(null, rwaRec, "en"));
+
+// --- migration terms & "migration opened" -------------------------------------------------------
+console.log("\n=== migration terms & opening ===");
+{
+  const { pollOpenings } = await import("../src/chain/migrationOpenWatcher.js");
+  const { formatMigrationOpened } = await import("../src/telegram/notificationFormatter.js");
+  const nowSec = BigInt((await chain.getBlock()).timestamp);
+  const oldA = await token("Legacy A", "LEGA");
+  const newA = await token("Fresh A", "FRSA");
+  const oldB = await token("Legacy B", "LEGB");
+  const newB = await token("Fresh B", "FRSB");
+  markets.set(lower(oldA), { low: 0.3, strict: 0.9, price: 0.0021 });
+  markets.set(lower(newA), { low: 0.3, strict: 0.9, price: 0.0022 });
+  markets.set(lower(oldB), { low: 0.3, strict: 0.9, price: 1.5 });
+  markets.set(lower(newB), "noroute");
+  // Not open yet: starts in a day.
+  const pending = await deployTimed(stranger, "TimedMigrator", [oldA, newA, nowSec + 86_400n, nowSec + 30n * 86_400n]);
+  // Open, and funded before it is even deployed (its address is known in advance).
+  const nonce = await chain.getTransactionCount({ address: stranger.account.address });
+  const openAddress = getContractAddress({ from: stranger.account.address, nonce: BigInt(nonce) });
+  const tokenAbi = artifacts.SimpleToken!.abi;
+  await chain.waitForTransactionReceipt({
+    hash: await owner.writeContract({ address: newB, abi: tokenAbi, functionName: "transfer", args: [openAddress, 10n ** 24n] } as never),
+  });
+  const open = await deployTimed(stranger, "TimedMigrator", [oldB, newB, nowSec - 60n, nowSec + 30n * 86_400n]);
+  const until = Date.now() + 30_000;
+  while ((!alerts.has(lower(pending)) || !alerts.has(lower(open))) && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
+  const pendingTerms = alerts.get(lower(pending))?.record.terms;
+  const openTerms = alerts.get(lower(open))?.record.terms;
+  check(
+    "terms: a migrator that starts tomorrow is 'not open yet' with its start and deadline from the contract",
+    pendingTerms?.status === "not_started" && pendingTerms.startsAt === Number(nowSec + 86_400n) && pendingTerms.endsAt === Number(nowSec + 30n * 86_400n),
+    pendingTerms,
+  );
+  const spread = pendingTerms?.prices?.spreadPercent ?? NaN;
+  check(
+    `terms: both tokens priced from the OKX quotes (old $0.0021, new $0.0022 → spread ${spread.toFixed(2)}% at 1:1)`,
+    Math.abs((pendingTerms?.prices?.oldUsd ?? 0) - 0.0021) < 1e-6 && Math.abs((pendingTerms?.prices?.newUsd ?? 0) - 0.0022) < 1e-6 && Math.abs(spread - 4.76) < 0.05,
+    pendingTerms?.prices,
+  );
+  check(
+    "terms: an unfunded migrator shows 0 new tokens on the contract",
+    pendingTerms?.funding?.kind === "balance" && pendingTerms.funding.empty,
+    pendingTerms?.funding,
+  );
+  check(
+    "terms: an open migrator funded with 1,000,000 new tokens says so; a new token without a market has no price",
+    openTerms?.status === "open" && openTerms.funding?.kind === "balance" && openTerms.funding.amount === "1,000,000" &&
+      openTerms.funding.symbol === "FRSB" && openTerms.prices?.oldUsd === 1.5 && openTerms.prices.newUsd === null && openTerms.prices.spreadPercent === null,
+    openTerms,
+  );
+  const pendingRec = alerts.get(lower(pending))?.record;
+  const cardEn = pendingRec ? formatMigrationAlert(null, pendingRec, "en") : "";
+  check(
+    "the card shows the status, deadline and prices with the spread (valid MarkdownV2)",
+    /Status: opens \d\d\\\.\d\d\\\.\d{4}/.test(cardEn) && /Deadline/.test(cardEn) && /old \$0\\\.002100 · new \$0\\\.002200 · spread \\\+4\\\.8% at 1:1/.test(cardEn) && !markdownV2Problem(cardEn),
+    cardEn,
+  );
+
+  // Someone migrates through the open one.
+  const migratorAbi = artifacts.TimedMigrator!.abi;
+  await chain.waitForTransactionReceipt({
+    hash: await owner.writeContract({ address: oldB, abi: tokenAbi, functionName: "approve", args: [open, 10n ** 21n] } as never),
+  });
+  const migrateTx = await owner.writeContract({ address: open, abi: migratorAbi, functionName: "migrate", args: [10n ** 21n] } as never);
+  await chain.waitForTransactionReceipt({ hash: migrateTx });
+  const opened: NonNullable<Record_>[] = [];
+  await pollOpenings(NETWORK, async (record) => void opened.push(record), { chunk: 500, maxChunks: 100 });
+  const openedOpen = opened.find((r) => eq(r.contractAddress, open));
+  check(
+    "migration opened: the first exchange through the contract is found, with its transaction",
+    !!openedOpen && eq(openedOpen.openedTx, migrateTx) && !opened.some((r) => eq(r.contractAddress, pending)),
+    opened.map((r) => ({ contract: r.contractAddress, tx: r.openedTx })),
+  );
+  const again: unknown[] = [];
+  await pollOpenings(NETWORK, async (record) => void again.push(record), { chunk: 500, maxChunks: 100 });
+  check("…and announced once: the next pass finds nothing new", again.length === 0, again);
+  // A detection from before the watch existed (no terms) is never watched — no "opened" for old news.
+  await pool.query(`UPDATE migration_contracts SET opened_at = NULL, opened_tx = NULL, open_cursor = NULL, terms = NULL WHERE contract_address = lower($1)`, [open]);
+  const legacy: unknown[] = [];
+  await pollOpenings(NETWORK, async (record) => void legacy.push(record), { chunk: 500, maxChunks: 100 });
+  check("a detection without terms (from before the watch) is not watched", legacy.length === 0, legacy);
+  const openedCard = openedOpen ? formatMigrationOpened(openedOpen, "ru") : "";
+  check(
+    "the 'migration opened' card names the transaction and the prices (valid MarkdownV2)",
+    /МИГРАЦИЯ ОТКРЫЛАСЬ/.test(openedCard) && openedCard.includes(migrateTx.slice(0, 6)) && /старый \$1\\\.50/.test(openedCard) && !markdownV2Problem(openedCard),
+    openedCard,
+  );
+  if (openedOpen) console.log("\n=== SAMPLE 'MIGRATION OPENED' CARD (ru) ===\n" + openedCard);
+}
 
 // --- load: one block with 150 new contracts, one of them a migration ---------------------------
 console.log("\n=== load: 151 contracts in one block ===");

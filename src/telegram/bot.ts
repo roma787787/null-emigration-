@@ -11,7 +11,7 @@ import { registerCustodianCommands } from "./commands/custodians.js";
 import { registerBackfillCommands } from "./commands/backfill.js";
 import { registerCallbacks } from "./callbacks.js";
 import { registerAccessControl, isAdminChat } from "./accessControl.js";
-import { formatMigrationAlert } from "./notificationFormatter.js";
+import { formatMigrationAlert, formatMigrationOpened } from "./notificationFormatter.js";
 import { formatListingAlert } from "./listingFormatter.js";
 import type { ListingBatch } from "../rwa/listings.js";
 import { chatSettingsRepository } from "../db/repositories/chatSettingsRepository.js";
@@ -85,6 +85,25 @@ export async function broadcastMigrationAlert(bot: Telegraf, analyzed: AnalyzedM
       });
     } catch (err) {
       logger.error({ err, chatId: chat.chatId }, "Failed to deliver alert to chat");
+    }
+  }
+}
+
+/** "Migration opened" to every chat that got (or would get) the first alert for this contract. */
+export async function broadcastMigrationOpened(bot: Telegraf, migration: MigrationContractRecord): Promise<void> {
+  const chats = await chatSettingsRepository.listAll();
+  for (const chat of chats) {
+    if (!chat.approved && !isAdminChat(chat.chatId)) continue;
+    if (chat.confidenceFilter === "HIGH_ONLY" && migration.confidence !== "HIGH") continue;
+    if (chat.networksFilter && !chat.networksFilter.includes(migration.network)) continue;
+    if (!wantsAutoAlert(chat, migration)) continue;
+    try {
+      await sendWithRetry(bot, chat.chatId, formatMigrationOpened(migration, chat.language ?? DEFAULT_LANGUAGE), {
+        parse_mode: "MarkdownV2",
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (err) {
+      logger.error({ err, chatId: chat.chatId }, "Failed to deliver migration-opened alert to chat");
     }
   }
 }

@@ -498,3 +498,21 @@ contract ConvertFromOldToken is SimpleToken {
     constructor(address t) SimpleToken("Next", "NXT", 1e24) { legacy = t; }
     function convertFromOld(uint256) external {}
 }
+
+/// A migrator with terms a trader reads: a start time, a deadline, a pause
+/// switch; pays out new tokens it was funded with, keeps the old ones.
+contract TimedMigrator {
+    address public oldToken;
+    address public newToken;
+    uint256 public startTime;
+    uint256 public endTime;
+    bool public paused;
+    event Migrated(address indexed user, uint256 amount);
+    constructor(address a, address b, uint256 s, uint256 e) { oldToken = a; newToken = b; startTime = s; endTime = e; }
+    function migrate(uint256 amount) external {
+        require(block.timestamp >= startTime && !paused, "closed");
+        SimpleToken(oldToken).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(newToken).transfer(msg.sender, amount);
+        emit Migrated(msg.sender, amount);
+    }
+}

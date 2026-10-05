@@ -86,6 +86,12 @@ ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS token_b_symbol_unverifi
 ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS rwa_signals TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS liquidity JSONB;
 ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS custodian_label TEXT;
+-- Migration terms read from the contract (status, dates, ratio, funding, prices),
+-- and the first exchange through it ("migration opened") with where the watch is at.
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS terms JSONB;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS opened_tx TEXT;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS open_cursor BIGINT;
 
 -- Per chat: liquidity test level for auto-discovered alerts, and whether to get them at all.
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS liquidity_level TEXT NOT NULL DEFAULT 'STRICT';

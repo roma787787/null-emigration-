@@ -32,6 +32,10 @@ interface MigrationContractRow {
   tx_hash: string;
   block_number: string;
   detected_at: Date;
+  terms: MigrationContractRecord["terms"];
+  opened_at: Date | null;
+  opened_tx: string | null;
+  open_cursor: string | null;
 }
 
 function toRecord(row: MigrationContractRow): MigrationContractRecord {
@@ -59,6 +63,9 @@ function toRecord(row: MigrationContractRow): MigrationContractRecord {
     txHash: row.tx_hash as `0x${string}`,
     blockNumber: BigInt(row.block_number),
     detectedAt: row.detected_at,
+    terms: row.terms ?? null,
+    openedAt: row.opened_at ?? null,
+    openedTx: (row.opened_tx as `0x${string}` | null) ?? null,
   };
 }
 
@@ -85,14 +92,16 @@ export const migrationContractRepository = {
     matchedGetter: string | null;
     txHash: `0x${string}`;
     blockNumber: bigint;
+    terms?: MigrationContractRecord["terms"];
   }): Promise<MigrationContractRecord | null> {
     const { rows } = await pool.query<MigrationContractRow>(
       `INSERT INTO migration_contracts
          (token_id, network, contract_address, creator_address, token_b_address, confidence, confidence_score,
           matched_functions, matched_events, matched_auxiliary, token_b_source, matched_getter, tx_hash, block_number,
-          discovery, token_a_address, token_a_symbol, token_b_symbol_unverified, rwa_signals, liquidity, custodian_label)
+          discovery, token_a_address, token_a_symbol, token_b_symbol_unverified, rwa_signals, liquidity, custodian_label,
+          terms)
        VALUES ($1, $2, lower($3), lower($4), lower($5), $6, $7, $8, $9, $10, $11, $12, $13, $14,
-               $15, lower($16), $17, $18, $19, $20, $21)
+               $15, lower($16), $17, $18, $19, $20, $21, $22)
        ON CONFLICT (network, contract_address) DO NOTHING
        RETURNING *`,
       [
@@ -117,9 +126,45 @@ export const migrationContractRepository = {
         input.rwaSignals ?? [],
         input.liquidity ? JSON.stringify(input.liquidity) : null,
         input.custodianLabel ?? null,
+        input.terms ? JSON.stringify(input.terms) : null,
       ],
     );
     return rows[0] ? toRecord(rows[0]) : null;
+  },
+
+  async setTerms(id: number, terms: MigrationContractRecord["terms"]): Promise<void> {
+    await pool.query(`UPDATE migration_contracts SET terms = $2 WHERE id = $1`, [id, terms ? JSON.stringify(terms) : null]);
+  },
+
+  /**
+   * Alerted contracts not yet seen open, detected within `days` and with a
+   * Token A: what the opening watcher scans. Only detections that carry terms
+   * (alerted since the watch exists, through the current filters) — never a
+   * backlog of old ones. `cursor` is the last block scanned, null before the first pass.
+   */
+  async listAwaitingOpen(network: NetworkKey, days: number): Promise<(MigrationContractRecord & { cursor: bigint | null })[]> {
+    const { rows } = await pool.query<MigrationContractRow>(
+      `SELECT * FROM migration_contracts
+        WHERE network = $1 AND opened_at IS NULL AND token_a_address IS NOT NULL AND terms IS NOT NULL
+          AND detected_at > now() - make_interval(days => $2)
+        ORDER BY detected_at`,
+      [network, days],
+    );
+    return rows.map((row) => ({ ...toRecord(row), cursor: row.open_cursor === null ? null : BigInt(row.open_cursor) }));
+  },
+
+  async setOpenCursor(id: number, block: bigint): Promise<void> {
+    await pool.query(`UPDATE migration_contracts SET open_cursor = $2 WHERE id = $1`, [id, block.toString()]);
+  },
+
+  /** Marks the contract opened; false when another worker already did. */
+  async markOpened(id: number, txHash: `0x${string}`, block: bigint, terms: MigrationContractRecord["terms"]): Promise<boolean> {
+    const { rowCount } = await pool.query(
+      `UPDATE migration_contracts SET opened_at = now(), opened_tx = lower($2), open_cursor = $3, terms = COALESCE($4, terms)
+        WHERE id = $1 AND opened_at IS NULL`,
+      [id, txHash, block.toString(), terms ? JSON.stringify(terms) : null],
+    );
+    return (rowCount ?? 0) > 0;
   },
 
   async alreadySeen(network: NetworkKey, contractAddress: `0x${string}`): Promise<boolean> {
