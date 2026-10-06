@@ -61,12 +61,24 @@ type Impacts = { low: number; strict: number; deep?: number; dollar?: boolean; p
 type Market = Impacts | "noroute" | { failFirst: number; then: Impacts };
 const markets = new Map<string, Market>();
 const okxRequests = new Map<string, number>();
+const okxSells: string[] = [];
 let okxSignedOk = true;
 const okx = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   const to = (url.searchParams.get("toTokenAddress") ?? "").toLowerCase();
+  const from = (url.searchParams.get("fromTokenAddress") ?? "").toLowerCase();
   const amount = BigInt(url.searchParams.get("amount") ?? "0");
   okxRequests.set(to, (okxRequests.get(to) ?? 0) + 1);
+  // A sale back into the test stable (the migration round trip): N tokens fetch N × price, less the $300 impact.
+  if (to === lower(usd)) {
+    const sold = markets.get(from);
+    okxSells.push(from);
+    if (!sold || typeof sold !== "object" || "failFirst" in sold || !sold.price) {
+      return void res.end(JSON.stringify({ code: "82000", msg: "Insufficient liquidity" }));
+    }
+    const out = (amount * BigInt(Math.round(sold.price * 1e6))) / 1_000_000n * BigInt(Math.round((100 - sold.low) * 100)) / 10_000n;
+    return void res.end(JSON.stringify({ code: "0", msg: "", data: [{ toTokenAmount: out.toString(), priceImpactPercent: String(-sold.low) }] }));
+  }
   if (!req.headers["ok-access-sign"] || !req.headers["ok-access-key"] || !req.headers["ok-access-timestamp"]) okxSignedOk = false;
   res.setHeader("content-type", "application/json");
   let market = markets.get(to);
@@ -578,6 +590,12 @@ console.log("\n=== migration terms & opening ===");
       Math.abs(spread - 4.76) < 0.05 && pendingTerms?.prices?.newThin === true && !pendingTerms.prices.oldThin,
     pendingTerms?.prices,
   );
+  const trip = pendingTerms?.prices?.roundTrip;
+  check(
+    `terms: the trade quoted both ways — $300 of the old token, migrated 1:1, sold on the thin market → $${trip?.outUsd} (${trip?.percent?.toFixed(1)}%)`,
+    trip?.inUsd === 300 && Math.abs((trip.outUsd ?? 0) - 276.57) < 0.02 && Math.abs((trip.percent ?? 0) + 7.81) < 0.02 && okxSells.includes(lower(newA)),
+    trip,
+  );
   check(
     "terms: an unfunded migrator shows 0 new tokens on the contract",
     pendingTerms?.funding?.kind === "balance" && pendingTerms.funding.empty,
@@ -592,8 +610,9 @@ console.log("\n=== migration terms & opening ===");
   const pendingRec = alerts.get(lower(pending))?.record;
   const cardEn = pendingRec ? formatMigrationAlert(null, pendingRec, "en") : "";
   check(
-    "the card shows the status, deadline and prices with the spread (valid MarkdownV2)",
-    /Status: opens \d\d\\\.\d\d\\\.\d{4}/.test(cardEn) && /Deadline/.test(cardEn) && /old \$0\\\.002100 · new \$0\\\.002200 \\\(thin market\\\) · spread \\\+4\\\.8% at 1:1/.test(cardEn) && !markdownV2Problem(cardEn),
+    "the card shows the status, deadline, prices and the trade result instead of the bare spread (valid MarkdownV2)",
+    /Status: opens \d\d\\\.\d\d\\\.\d{4}/.test(cardEn) && /Deadline/.test(cardEn) && /old \$0\\\.002100 · new \$0\\\.002200 \\\(thin market\\\)/.test(cardEn) &&
+      !/spread/.test(cardEn) && /🔄 .*\$300.*\$276\\\.5\d \\\(−7\\\.8%\\\)/.test(cardEn) && !markdownV2Problem(cardEn),
     cardEn,
   );
 

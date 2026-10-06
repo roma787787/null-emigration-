@@ -250,14 +250,18 @@ find migrations. For every block on every enabled network:
    buy-old/migrate/sell-new spread at 1:1 — the old token's from its $300
    test swap, the new token's (often on a thin first pool) from a small
    `PRICE_QUOTE_USD` ($20) quote with no impact cap, marked "thin market"
-   when that quote moved the price over 5%.
+   when that quote moved the price over 5%. Where the new token has a market,
+   the card quotes the **trade itself** instead of the bare spread: the old
+   tokens the $300 test swap bought, migrated 1:1, sold back into the
+   stablecoin on OKX (`🔄 Trade $300: … = $276.57 (−7.8%)`) — slippage on a
+   thin pool is in the number, which two spot prices hide.
 7. **"Migration opened"** — a second card on the first exchange through an
    alerted contract: the old token sent into it, the new token sent out of it
    (or minted by it), or one of its migration events. Found from logs every
    `OPEN_WATCH_INTERVAL_MS` (default 60 s), so it needs no tracing; watched
    for `OPEN_WATCH_DAYS` (default 30) after the alert, only for alerts since
    this watch exists. The card links the first transaction, says how long
-   after the first alert it came, and repeats fresh prices and the spread.
+   after the first alert it came, and repeats fresh prices and the trade quote.
    `MIGRATION_OPEN_WATCH=off` turns it off.
 
 **RWA / tokenized stocks.** `isin()`, `cusip()`, `underlyingAsset()` and

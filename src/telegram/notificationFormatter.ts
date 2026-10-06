@@ -101,7 +101,8 @@ export function pricesLine(lang: Language, terms: MigrationTerms | null | undefi
     `${t(lang, "card.priceOld")} ${price(prices.oldUsd, prices.oldThin)}`,
     `${t(lang, "card.priceNew")} ${price(prices.newUsd, prices.newThin)}`,
   ];
-  if (prices.spreadPercent !== null) {
+  // With the trade quoted both ways, the round trip replaces the spread of two prices.
+  if (prices.spreadPercent !== null && !prices.roundTrip) {
     parts.push(t(lang, "card.spread", { spread: formatSpread(prices.spreadPercent) }) + (terms?.ratio ? ` (${t(lang, "card.spreadCheckRatio")})` : ""));
   }
   return `💱 ${escapeMd(t(lang, "card.prices"))}: ${escapeMd(parts.join(" · "))}`;
@@ -132,6 +133,14 @@ export function termsLines(lang: Language, terms: MigrationTerms | null | undefi
   }
   const prices = pricesLine(lang, terms);
   if (prices) lines.push(prices);
+  const trip = terms.prices?.roundTrip;
+  if (trip) {
+    const text =
+      trip.outUsd === null || trip.percent === null
+        ? t(lang, "card.roundTripNoRoute", { in: formatUsd(trip.inUsd) })
+        : t(lang, "card.roundTrip", { in: formatUsd(trip.inUsd), out: formatUsd(trip.outUsd), pct: formatSpread(trip.percent) });
+    lines.push(`🔄 ${escapeMd(text)}${terms.ratio ? ` _\\(${escapeMd(t(lang, "card.spreadCheckRatio"))}\\)_` : ""}`);
+  }
   return lines;
 }
 

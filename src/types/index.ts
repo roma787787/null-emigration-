@@ -65,6 +65,11 @@ export interface MigrationTerms {
     /** The price came from a small quote that moved the market a lot (a thin pool): indicative only. */
     oldThin?: boolean;
     newThin?: boolean;
+    /**
+     * The trade itself, both sides quoted: $inUsd buys old tokens, migrated
+     * 1:1, sold back for $outUsd (null: no route to sell the new token).
+     */
+    roundTrip?: { inUsd: number; outUsd: number | null; percent: number | null };
   } | null;
 }
 

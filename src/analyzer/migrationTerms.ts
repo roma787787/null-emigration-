@@ -1,7 +1,8 @@
 import { decodeFunctionResult, isAddressEqual, toFunctionSelector, type Address, type Hex, type PublicClient } from "viem";
 import type { MigrationTerms, NetworkKey } from "../types/index.js";
 import { getPublicClient } from "../chain/provider.js";
-import { checkLiquidity, quoteForPrice, type LiquidityCheck, type PriceQuote } from "../liquidity/okxLiquidity.js";
+import { checkLiquidity, quoteForPrice, quoteSwap, type LiquidityCheck, type PriceQuote } from "../liquidity/okxLiquidity.js";
+import { quoteTokenFor } from "../config/marketAssets.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
 import { inspectContract } from "./migrationAnalyzer.js";
@@ -188,6 +189,7 @@ export async function readPrices(
   const newUsd = priceFromQuote(qB, decB);
   const newThin = (qB?.impactPercent ?? 0) > THIN_IMPACT_PERCENT;
   if (oldUsd === null && newUsd === null) return null;
+  const roundTrip = tokenB && newUsd !== null ? await readRoundTrip(network, tokenB, checkA, decA, decB) : null;
   return {
     oldUsd,
     newUsd,
@@ -195,7 +197,34 @@ export async function readPrices(
     at: Date.now(),
     ...(oldThin && oldUsd !== null ? { oldThin } : {}),
     ...(newThin && newUsd !== null ? { newThin } : {}),
+    ...(roundTrip ? { roundTrip } : {}),
   };
+}
+
+/** Old tokens' raw amount as the same number of whole new tokens (1:1), across decimals. */
+export function sameAmountIn(raw: bigint, fromDecimals: number, toDecimals: number): bigint {
+  return toDecimals >= fromDecimals ? raw * 10n ** BigInt(toDecimals - fromDecimals) : raw / 10n ** BigInt(fromDecimals - toDecimals);
+}
+
+/**
+ * The migration trade quoted on both sides: what Token A's $300 test swap
+ * bought, migrated 1:1, sold back into the stablecoin. Thin pools and
+ * slippage both ways are in the number — unlike the spread of two prices.
+ */
+async function readRoundTrip(
+  network: NetworkKey,
+  tokenB: Address,
+  checkA: LiquidityCheck,
+  decA: number | null,
+  decB: number | null,
+): Promise<NonNullable<MigrationTerms["prices"]>["roundTrip"] | null> {
+  const stable = quoteTokenFor(network);
+  if (checkA.status !== "pass" || !checkA.amountOut || decA === null || decB === null || !stable) return null;
+  const newRaw = sameAmountIn(BigInt(checkA.amountOut), decA, decB);
+  const sold = await quoteSwap(network, tokenB, stable.address, newRaw);
+  if (!sold) return { inUsd: checkA.amountUsd, outUsd: null, percent: null };
+  const outUsd = Number((sold.amountOut * 100n) / 10n ** BigInt(stable.decimals)) / 100;
+  return { inUsd: checkA.amountUsd, outUsd, percent: ((outUsd - checkA.amountUsd) / checkA.amountUsd) * 100 };
 }
 
 /** Terms for a detected contract, inspecting its code for the getters it has. Null when even that fails. */

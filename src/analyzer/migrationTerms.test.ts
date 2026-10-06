@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatAmount, priceFromCheck, priceFromQuote, spreadPercent } from "./migrationTerms.js";
+import { formatAmount, priceFromCheck, priceFromQuote, sameAmountIn, spreadPercent } from "./migrationTerms.js";
 import { formatSpread, formatUsd, formatUtc, termsLines } from "../telegram/notificationFormatter.js";
 import { markdownV2Problem } from "../telegram/markdownV2.js";
 import type { MigrationTerms } from "../types/index.js";
@@ -46,6 +46,8 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
     { ...base, prices: { oldUsd: 0.0021, newUsd: 0.0022, spreadPercent: 4.76, at: 0 } },
     { ...base, prices: { oldUsd: 0.0021, newUsd: 0.0022, spreadPercent: 4.76, at: 0, newThin: true } },
     { ...base, ratio: { getter: "rate()", value: "1" }, prices: { oldUsd: 1.5, newUsd: null, spreadPercent: null, at: 0 } },
+    { ...base, prices: { oldUsd: 0.0021, newUsd: 0.0022, spreadPercent: 4.76, at: 0, newThin: true, roundTrip: { inUsd: 300, outUsd: 276.57, percent: -7.81 } } },
+    { ...base, ratio: { getter: "rate()", value: "2" }, prices: { oldUsd: 0.0021, newUsd: 0.0022, spreadPercent: 4.76, at: 0, roundTrip: { inUsd: 300, outUsd: null, percent: null } } },
   ];
   for (const lang of ["en", "uk", "ru"] as const) {
     for (const terms of shapes) {
@@ -56,5 +58,16 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
   assert.match(termsLines("en", shapes[1]!).join("\n"), /opens 24\\\.09\\\.2026 12:00 UTC/);
   assert.match(termsLines("ru", shapes[5]!).join("\n"), /старый \$0\\\.002100 · новый \$0\\\.002200 · разница \\\+4\\\.8% при 1:1/);
   assert.match(termsLines("en", shapes[6]!).join("\n"), /new \$0\\\.002200 \\\(thin market\\\)/);
+  // With the trade quoted both ways, the bare spread of two prices gives way to it.
+  const traded = termsLines("ru", shapes[8]!).join("\n");
+  assert.doesNotMatch(traded, /разница/);
+  assert.match(traded, /🔄 Сделка на \$300\\\.00: .* \\= \$276\\\.57 \\\(−7\\\.8%\\\)/);
+  assert.match(termsLines("en", shapes[9]!).join("\n"), /🔄 Trade \$300\\\.00: .*no route now/);
   assert.deepEqual(termsLines("en", null), []);
+});
+
+test("the old tokens bought become as many whole new tokens, across decimals", () => {
+  assert.equal(sameAmountIn(5n * 10n ** 18n, 18, 18), 5n * 10n ** 18n);
+  assert.equal(sameAmountIn(5n * 10n ** 18n, 18, 6), 5_000_000n);
+  assert.equal(sameAmountIn(5_000_000n, 6, 18), 5n * 10n ** 18n);
 });

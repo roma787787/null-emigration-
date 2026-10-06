@@ -123,6 +123,46 @@ export function verdictFromQuote(
 
 const cache = new Map<string, { at: number; check: LiquidityCheck }>();
 
+const swapCache = new Map<string, { at: number; result: { amountOut: bigint; impactPercent: number | null } | null }>();
+
+/**
+ * Any swap quote (raw amounts): what `amount` of `fromToken` buys of
+ * `toToken`. Null without a route, config or answer. For selling the new
+ * token back into the stablecoin (the migration round trip).
+ */
+export async function quoteSwap(
+  network: NetworkKey,
+  fromToken: string,
+  toToken: string,
+  amount: bigint,
+): Promise<{ amountOut: bigint; impactPercent: number | null } | null> {
+  if (amount <= 0n) return null;
+  const key = `${network}:${fromToken.toLowerCase()}:${toToken.toLowerCase()}:${amount}`;
+  const cached = swapCache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.result;
+  const config = okxConfig();
+  if (!config) return null;
+  try {
+    const body = await requestQuote(config, {
+      chainIndex: String(getNetwork(network).chain.id),
+      fromTokenAddress: fromToken.toLowerCase(),
+      toTokenAddress: toToken.toLowerCase(),
+      amount: amount.toString(),
+      swapMode: "exactIn",
+      slippagePercent: "1",
+    });
+    const data = body.code === "0" ? body.data?.[0] : undefined;
+    const ok = data?.toTokenAmount && BigInt(data.toTokenAmount) > 0n && !data.toToken?.isHoneyPot;
+    const impact = Math.abs(Number(data?.priceImpactPercent ?? data?.priceImpactPercentage));
+    const result = ok ? { amountOut: BigInt(data!.toTokenAmount!), impactPercent: Number.isFinite(impact) ? impact : null } : null;
+    if (body.code === "0" || String(body.code ?? "").startsWith("82")) swapCache.set(key, { at: Date.now(), result });
+    return result;
+  } catch (err) {
+    logger.warn({ err, network, fromToken, toToken }, "OKX swap quote failed");
+    return null;
+  }
+}
+
 export interface PriceQuote {
   amountUsd: number;
   /** Raw amount of the token the swap buys. */
@@ -174,6 +214,8 @@ export function okxRequestsSent(): number {
 
 export function clearLiquidityCache(): void {
   cache.clear();
+  priceCache.clear();
+  swapCache.clear();
 }
 
 // OKX rate-limits DEX API keys (code 50011): requests go out one at a time,
