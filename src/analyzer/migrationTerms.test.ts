@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatAmount, priceFromCheck, spreadPercent } from "./migrationTerms.js";
+import { formatAmount, priceFromCheck, priceFromQuote, spreadPercent } from "./migrationTerms.js";
 import { formatSpread, formatUsd, formatUtc, termsLines } from "../telegram/notificationFormatter.js";
 import { markdownV2Problem } from "../telegram/markdownV2.js";
 import type { MigrationTerms } from "../types/index.js";
@@ -16,6 +16,9 @@ test("price per whole token from a $300 test swap, and the spread at 1:1", () =>
   assert.equal(priceFromCheck({ ...check("1"), status: "skip" }, 18), null);
   assert.equal(priceFromCheck(check("1000"), null), null);
   assert.ok(Math.abs(spreadPercent(0.0021, 0.0022)! - 4.7619) < 1e-3);
+  // $20 small quote bought 10,000 tokens → $0.002
+  assert.equal(priceFromQuote({ amountUsd: 20, amountOut: (10_000n * 10n ** 18n).toString(), impactPercent: 12 }, 18), 0.002);
+  assert.equal(priceFromQuote(null, 18), null);
   assert.equal(spreadPercent(null, 0.0022), null);
 });
 
@@ -41,6 +44,7 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
     { ...base, status: "paused", funding: { kind: "balance", amount: "1,000,000.50", empty: false, symbol: "NEW" } },
     { ...base, status: "ended", funding: { kind: "balance", amount: "0", empty: true, symbol: null } },
     { ...base, prices: { oldUsd: 0.0021, newUsd: 0.0022, spreadPercent: 4.76, at: 0 } },
+    { ...base, prices: { oldUsd: 0.0021, newUsd: 0.0022, spreadPercent: 4.76, at: 0, newThin: true } },
     { ...base, ratio: { getter: "rate()", value: "1" }, prices: { oldUsd: 1.5, newUsd: null, spreadPercent: null, at: 0 } },
   ];
   for (const lang of ["en", "uk", "ru"] as const) {
@@ -51,5 +55,6 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
   }
   assert.match(termsLines("en", shapes[1]!).join("\n"), /opens 24\\\.09\\\.2026 12:00 UTC/);
   assert.match(termsLines("ru", shapes[5]!).join("\n"), /старый \$0\\\.002100 · новый \$0\\\.002200 · разница \\\+4\\\.8% при 1:1/);
+  assert.match(termsLines("en", shapes[6]!).join("\n"), /new \$0\\\.002200 \\\(thin market\\\)/);
   assert.deepEqual(termsLines("en", null), []);
 });

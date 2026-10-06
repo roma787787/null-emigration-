@@ -246,8 +246,11 @@ find migrations. For every block on every enabled network:
    `startTime()`, `paused()`, `isActive()`-style getters), the deadline
    (`endTime()`, `deadline()`…), the ratio (`ratio()`, `rate()`,
    `LEND_AAVE_RATIO()`… — raw, its meaning varies), the new tokens already on
-   the contract or "minted on exchange", and both tokens' USD prices from the
-   $300 OKX quotes with the buy-old/migrate/sell-new spread at 1:1.
+   the contract or "minted on exchange", and both tokens' USD prices with the
+   buy-old/migrate/sell-new spread at 1:1 — the old token's from its $300
+   test swap, the new token's (often on a thin first pool) from a small
+   `PRICE_QUOTE_USD` ($20) quote with no impact cap, marked "thin market"
+   when that quote moved the price over 5%.
 7. **"Migration opened"** — a second card on the first exchange through an
    alerted contract: the old token sent into it, the new token sent out of it
    (or minted by it), or one of its migration events. Found from logs every

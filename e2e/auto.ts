@@ -509,7 +509,7 @@ check("custodian RWA alert reaches Strict chats without a DEX market", !!rwaRec 
 const trackedRec = alerts.get(lower(cases[2]!.address))?.record;
 check("tracked-project alerts ignore the auto toggle and liquidity level", !!trackedRec && wantsAutoAlert(trackedOnlyChat, trackedRec));
 const twinRequests = okxRequests.get(lower(oldTwin)) ?? 0;
-check(`OKX results cached per token: OLD-twin used by 6 contracts, ${twinRequests} quote request(s) (≤ 3: $300 + $1,000 + $10,000)`, twinRequests <= 3 && twinRequests > 0, twinRequests);
+check(`OKX results cached per token: OLD-twin used by 6 contracts, ${twinRequests} quote request(s) (≤ 4: $300 + $1,000 + $10,000 + the $20 price quote)`, twinRequests <= 4 && twinRequests > 0, twinRequests);
 check("every OKX request carried the signed OK-ACCESS-* headers", okxSignedOk);
 const viaRecheck = new Set([lower(lendProxy), lower(late)]); // found on re-check by design, seconds later
 const latencies = cases.filter((c) => !viaRecheck.has(lower(c.address))).flatMap((c) => {
@@ -548,7 +548,8 @@ console.log("\n=== migration terms & opening ===");
   const oldB = await token("Legacy B", "LEGB");
   const newB = await token("Fresh B", "FRSB");
   markets.set(lower(oldA), { low: 0.3, strict: 0.9, price: 0.0021 });
-  markets.set(lower(newA), { low: 0.3, strict: 0.9, price: 0.0022 });
+  // The new token trades, but thinly: even the small price quote moves it 12%.
+  markets.set(lower(newA), { low: 12, strict: 25, price: 0.0022 });
   markets.set(lower(oldB), { low: 0.3, strict: 0.9, price: 1.5 });
   markets.set(lower(newB), "noroute");
   // Not open yet: starts in a day.
@@ -572,8 +573,9 @@ console.log("\n=== migration terms & opening ===");
   );
   const spread = pendingTerms?.prices?.spreadPercent ?? NaN;
   check(
-    `terms: both tokens priced from the OKX quotes (old $0.0021, new $0.0022 → spread ${spread.toFixed(2)}% at 1:1)`,
-    Math.abs((pendingTerms?.prices?.oldUsd ?? 0) - 0.0021) < 1e-6 && Math.abs((pendingTerms?.prices?.newUsd ?? 0) - 0.0022) < 1e-6 && Math.abs(spread - 4.76) < 0.05,
+    `terms: both tokens priced from the OKX quotes (old $0.0021, new $0.0022 on a thin market → spread ${spread.toFixed(2)}% at 1:1)`,
+    Math.abs((pendingTerms?.prices?.oldUsd ?? 0) - 0.0021) < 1e-6 && Math.abs((pendingTerms?.prices?.newUsd ?? 0) - 0.0022) < 1e-6 &&
+      Math.abs(spread - 4.76) < 0.05 && pendingTerms?.prices?.newThin === true && !pendingTerms.prices.oldThin,
     pendingTerms?.prices,
   );
   check(
@@ -591,7 +593,7 @@ console.log("\n=== migration terms & opening ===");
   const cardEn = pendingRec ? formatMigrationAlert(null, pendingRec, "en") : "";
   check(
     "the card shows the status, deadline and prices with the spread (valid MarkdownV2)",
-    /Status: opens \d\d\\\.\d\d\\\.\d{4}/.test(cardEn) && /Deadline/.test(cardEn) && /old \$0\\\.002100 · new \$0\\\.002200 · spread \\\+4\\\.8% at 1:1/.test(cardEn) && !markdownV2Problem(cardEn),
+    /Status: opens \d\d\\\.\d\d\\\.\d{4}/.test(cardEn) && /Deadline/.test(cardEn) && /old \$0\\\.002100 · new \$0\\\.002200 \\\(thin market\\\) · spread \\\+4\\\.8% at 1:1/.test(cardEn) && !markdownV2Problem(cardEn),
     cardEn,
   );
 

@@ -57,7 +57,15 @@ export interface MigrationTerms {
   /** New tokens already on the contract to hand out, or minted on exchange (the contract is the new token). */
   funding: { kind: "balance"; amount: string; empty: boolean; symbol: string | null } | { kind: "mint" } | null;
   /** USD per whole token from $300 test swaps, and buy-old/migrate/sell-new at 1:1 in percent. */
-  prices: { oldUsd: number | null; newUsd: number | null; spreadPercent: number | null; at: number } | null;
+  prices: {
+    oldUsd: number | null;
+    newUsd: number | null;
+    spreadPercent: number | null;
+    at: number;
+    /** The price came from a small quote that moved the market a lot (a thin pool): indicative only. */
+    oldThin?: boolean;
+    newThin?: boolean;
+  } | null;
 }
 
 export interface MigrationContractRecord {

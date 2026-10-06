@@ -1,7 +1,7 @@
 import { decodeFunctionResult, isAddressEqual, toFunctionSelector, type Address, type Hex, type PublicClient } from "viem";
 import type { MigrationTerms, NetworkKey } from "../types/index.js";
 import { getPublicClient } from "../chain/provider.js";
-import { checkLiquidity, type LiquidityCheck } from "../liquidity/okxLiquidity.js";
+import { checkLiquidity, quoteForPrice, type LiquidityCheck, type PriceQuote } from "../liquidity/okxLiquidity.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
 import { inspectContract } from "./migrationAnalyzer.js";
@@ -151,7 +151,22 @@ export async function readMigrationTerms(input: TermsInput): Promise<MigrationTe
   return terms;
 }
 
-/** USD prices of both tokens from $300 test swaps, and the spread at 1:1. */
+/** A small price quote's USD per whole token. */
+export function priceFromQuote(quote: PriceQuote | null, decimals: number | null): number | null {
+  if (!quote || decimals === null) return null;
+  const tokens = Number(BigInt(quote.amountOut) * 1_000_000n / 10n ** BigInt(decimals)) / 1_000_000;
+  return tokens > 0 ? quote.amountUsd / tokens : null;
+}
+
+/** Impact above this on the small price quote marks the market thin. */
+const THIN_IMPACT_PERCENT = 5;
+
+/**
+ * USD prices of both tokens and the spread at 1:1. The old token's comes
+ * from its $300 test swap when that passed; otherwise — and always for the
+ * new token, whose market is often thin at first — from a small quote with
+ * no impact cap, flagged thin when it moved the price a lot.
+ */
 export async function readPrices(
   network: NetworkKey,
   tokenA: Address | null,
@@ -160,16 +175,27 @@ export async function readPrices(
 ): Promise<MigrationTerms["prices"]> {
   if (!tokenA) return null;
   const client = getPublicClient(network);
-  const [checkA, checkB, decA, decB] = await Promise.all([
-    tokenACheck ? Promise.resolve(tokenACheck) : checkLiquidity(network, tokenA, "LOW_CAP"),
-    tokenB ? checkLiquidity(network, tokenB, "LOW_CAP") : Promise.resolve(undefined),
-    tokenDecimals(client, tokenA),
-    tokenB ? tokenDecimals(client, tokenB) : Promise.resolve(null),
-  ]);
-  const oldUsd = priceFromCheck(checkA, decA);
-  const newUsd = priceFromCheck(checkB, decB);
+  const checkA = tokenACheck ?? (await checkLiquidity(network, tokenA, "LOW_CAP"));
+  const [decA, decB] = await Promise.all([tokenDecimals(client, tokenA), tokenB ? tokenDecimals(client, tokenB) : Promise.resolve(null)]);
+  let oldUsd = priceFromCheck(checkA, decA);
+  let oldThin = false;
+  if (oldUsd === null) {
+    const q = await quoteForPrice(network, tokenA);
+    oldUsd = priceFromQuote(q, decA);
+    oldThin = (q?.impactPercent ?? 0) > THIN_IMPACT_PERCENT;
+  }
+  const qB = tokenB ? await quoteForPrice(network, tokenB) : null;
+  const newUsd = priceFromQuote(qB, decB);
+  const newThin = (qB?.impactPercent ?? 0) > THIN_IMPACT_PERCENT;
   if (oldUsd === null && newUsd === null) return null;
-  return { oldUsd, newUsd, spreadPercent: spreadPercent(oldUsd, newUsd), at: Date.now() };
+  return {
+    oldUsd,
+    newUsd,
+    spreadPercent: spreadPercent(oldUsd, newUsd),
+    at: Date.now(),
+    ...(oldThin && oldUsd !== null ? { oldThin } : {}),
+    ...(newThin && newUsd !== null ? { newThin } : {}),
+  };
 }
 
 /** Terms for a detected contract, inspecting its code for the getters it has. Null when even that fails. */

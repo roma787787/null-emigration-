@@ -122,6 +122,49 @@ export function verdictFromQuote(
 }
 
 const cache = new Map<string, { at: number; check: LiquidityCheck }>();
+
+export interface PriceQuote {
+  amountUsd: number;
+  /** Raw amount of the token the swap buys. */
+  amountOut: string;
+  impactPercent: number | null;
+}
+const priceCache = new Map<string, { at: number; quote: PriceQuote | null }>();
+
+/**
+ * A small quote (PRICE_QUOTE_USD, default $20) for a token's price, with no
+ * impact cap: a thin new market still gets a price, its impact says how thin.
+ * Null without a route, OKX config or an answer.
+ */
+export async function quoteForPrice(network: NetworkKey, token: string): Promise<PriceQuote | null> {
+  const amountUsd = Math.max(1, Math.round(Number(process.env.PRICE_QUOTE_USD ?? 20)) || 20);
+  const key = `${network}:${token.toLowerCase()}:${amountUsd}`;
+  const cached = priceCache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.quote;
+  const config = okxConfig();
+  const quoteToken = quoteTokenFor(network);
+  if (!config || !quoteToken || token.toLowerCase() === quoteToken.address) return null;
+  try {
+    const body = await requestQuote(config, {
+      chainIndex: String(getNetwork(network).chain.id),
+      fromTokenAddress: quoteToken.address,
+      toTokenAddress: token.toLowerCase(),
+      amount: (BigInt(amountUsd) * 10n ** BigInt(quoteToken.decimals)).toString(),
+      swapMode: "exactIn",
+      slippagePercent: "1",
+    });
+    const data = body.code === "0" ? body.data?.[0] : undefined;
+    const ok = data?.toTokenAmount && BigInt(data.toTokenAmount) > 0n && !data.toToken?.isHoneyPot;
+    const impact = Math.abs(Number(data?.priceImpactPercent ?? data?.priceImpactPercentage));
+    const quote = ok ? { amountUsd, amountOut: data!.toTokenAmount!, impactPercent: Number.isFinite(impact) ? impact : null } : null;
+    // A routing answer (code 0 or 82xxx) is cached; an outage is asked again next time.
+    if (body.code === "0" || String(body.code ?? "").startsWith("82")) priceCache.set(key, { at: Date.now(), quote });
+    return quote;
+  } catch (err) {
+    logger.warn({ err, network, token }, "OKX price quote failed");
+    return null;
+  }
+}
 let requestsSent = 0;
 
 /** Test-only visibility into how many quotes actually went out (cache hits don't count). */

@@ -95,8 +95,12 @@ export function formatSpread(percent: number): string {
 export function pricesLine(lang: Language, terms: MigrationTerms | null | undefined): string | null {
   const prices = terms?.prices;
   if (!prices) return null;
-  const price = (v: number | null) => (v === null ? t(lang, "card.noMarket") : formatUsd(v));
-  const parts = [`${t(lang, "card.priceOld")} ${price(prices.oldUsd)}`, `${t(lang, "card.priceNew")} ${price(prices.newUsd)}`];
+  const price = (v: number | null, thin?: boolean) =>
+    v === null ? t(lang, "card.noMarket") : formatUsd(v) + (thin ? ` (${t(lang, "card.thinMarket")})` : "");
+  const parts = [
+    `${t(lang, "card.priceOld")} ${price(prices.oldUsd, prices.oldThin)}`,
+    `${t(lang, "card.priceNew")} ${price(prices.newUsd, prices.newThin)}`,
+  ];
   if (prices.spreadPercent !== null) {
     parts.push(t(lang, "card.spread", { spread: formatSpread(prices.spreadPercent) }) + (terms?.ratio ? ` (${t(lang, "card.spreadCheckRatio")})` : ""));
   }
