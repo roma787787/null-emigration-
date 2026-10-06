@@ -1,4 +1,4 @@
-import { createPublicClient, fallback, http, webSocket } from "viem";
+import { createPublicClient, fallback, http, webSocket, type PublicClient } from "viem";
 import { socketClientCache } from "viem/utils";
 import type { NetworkKey } from "../types/index.js";
 import { getNetwork, rpcUrlsForNetwork } from "../config/networks.js";
@@ -80,4 +80,22 @@ export function resetWebSocketConnections(network: NetworkKey): number {
     }
   }
   return closed;
+}
+
+const singleClients = new Map<NetworkKey, PublicClient[]>();
+
+/**
+ * One client per configured HTTP RPC, no fallback between them. A node that
+ * answers "not found" (pruned history, a short transaction index) is a
+ * success to the fallback transport, so a lookup that must not miss old data
+ * asks each in turn.
+ */
+export function getSingleRpcClients(network: NetworkKey): PublicClient[] {
+  const cached = singleClients.get(network);
+  if (cached) return cached;
+  const list = rpcUrlsForNetwork(network)
+    .filter((url) => !isWebSocketUrl(url))
+    .map((url) => createPublicClient({ chain: getNetwork(network).chain, transport: http(url, { timeout: 10_000, retryCount: 1 }) }) as PublicClient);
+  singleClients.set(network, list);
+  return list;
 }

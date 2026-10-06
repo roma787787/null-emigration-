@@ -96,10 +96,15 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
 
     try {
       let candidates: TokenRecord[] = [];
-      const result = await analyzeDeployTx(network, hash, async (creator) => {
-        candidates = await tokenACandidates(network, explicitTokenA, creator);
-        return candidates.map((c) => c.address);
-      });
+      const result = await analyzeDeployTx(
+        network,
+        hash,
+        async (creator) => {
+          candidates = await tokenACandidates(network, explicitTokenA, creator);
+          return candidates.map((c) => c.address);
+        },
+        onlyContract ?? undefined,
+      );
 
       if (result.status === "not_found") {
         await ctx.reply(t(lang, "analyze.notFound", { hash, network }));

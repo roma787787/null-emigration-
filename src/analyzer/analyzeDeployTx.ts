@@ -3,9 +3,13 @@ import {
   TransactionReceiptNotFoundError,
   type Address,
   type Hex,
+  type PublicClient,
+  type Transaction,
+  type TransactionReceipt,
 } from "viem";
 import type { MigrationAnalysisResult, NetworkKey } from "../types/index.js";
-import { getPublicClient } from "../chain/provider.js";
+import { getPublicClient, getSingleRpcClients } from "../chain/provider.js";
+import { getTransactionViaExplorer } from "../chain/ownerDiscovery.js";
 import { findFactoryCreatedContracts } from "../chain/traceCreateDetector.js";
 import { analyzeMigrationContract } from "./migrationAnalyzer.js";
 
@@ -31,32 +35,57 @@ export type DeployTxAnalysis =
  * contract it created. Backs the /analyze command, so real historical
  * migration contracts can be checked without deploying anything.
  */
+/**
+ * The transaction and its receipt: the usual client first, then each RPC on
+ * its own (one may keep older history than another), then the explorer.
+ * Null when none has it; throws only when every source failed outright.
+ */
+async function fetchTransaction(
+  network: NetworkKey,
+  txHash: Hex,
+): Promise<{ tx: Transaction; receipt: TransactionReceipt } | null> {
+  let lastError: unknown = null;
+  const clients: PublicClient[] = [getPublicClient(network) as PublicClient, ...getSingleRpcClients(network)];
+  for (const client of clients) {
+    try {
+      const [tx, receipt] = await Promise.all([client.getTransaction({ hash: txHash }), client.getTransactionReceipt({ hash: txHash })]);
+      return { tx, receipt };
+    } catch (err) {
+      if (!(err instanceof TransactionNotFoundError || err instanceof TransactionReceiptNotFoundError)) lastError = err;
+    }
+  }
+  const viaExplorer = await getTransactionViaExplorer(network, txHash);
+  if (viaExplorer) return viaExplorer;
+  if (lastError) throw lastError;
+  return null;
+}
+
 export async function analyzeDeployTx(
   network: NetworkKey,
   txHash: Hex,
   /** Token A candidates once the creator is known (an explicit token, or tracked tokens the creator owns). */
   resolveTokenACandidates: (creator: Address) => Promise<Address[]>,
+  /**
+   * The contract the caller is after (/analyze <address>): analyzed even when
+   * the RPC can't trace which factory call created it.
+   */
+  knownContract?: Address,
 ): Promise<DeployTxAnalysis> {
   const client = getPublicClient(network);
 
-  let tx, receipt;
-  try {
-    [tx, receipt] = await Promise.all([
-      client.getTransaction({ hash: txHash }),
-      client.getTransactionReceipt({ hash: txHash }),
-    ]);
-  } catch (err) {
-    if (err instanceof TransactionNotFoundError || err instanceof TransactionReceiptNotFoundError) {
-      return { status: "not_found" };
-    }
-    throw err;
-  }
+  const found = await fetchTransaction(network, txHash);
+  if (!found) return { status: "not_found" };
+  const { tx, receipt } = found;
 
   if (receipt.status === "reverted") return { status: "reverted" };
 
-  const created = receipt.contractAddress
+  let created = receipt.contractAddress
     ? [{ address: receipt.contractAddress, input: tx.input }]
     : await findFactoryCreatedContracts(client, network, txHash);
+  if (created.length === 0 && knownContract) {
+    const code = await client.getCode({ address: knownContract }).catch(() => undefined);
+    if (code && code !== "0x") created = [{ address: knownContract, input: "0x" }];
+  }
 
   if (created.length === 0) return { status: "no_contract" };
 

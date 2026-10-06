@@ -1,4 +1,4 @@
-import { getAddress, isAddressEqual, isHex, zeroAddress, type Address, type Hex } from "viem";
+import { formatTransaction, formatTransactionReceipt, getAddress, isAddressEqual, isHex, zeroAddress, type Address, type Hex, type Transaction, type TransactionReceipt } from "viem";
 import type { NetworkKey, OwnerSource } from "../types/index.js";
 import { getPublicClient } from "./provider.js";
 import { getNetwork } from "../config/networks.js";
@@ -51,6 +51,38 @@ export async function getContractCreation(network: NetworkKey, contractAddress: 
   const row = Array.isArray(body.result) ? body.result[0] : undefined;
   if (!row?.contractCreator || !row.txHash || !isHex(row.txHash) || row.txHash.length !== 66) return null;
   return { creator: getAddress(row.contractCreator), txHash: row.txHash };
+}
+
+/**
+ * A transaction and its receipt through the explorer's RPC proxy — for when
+ * the RPC nodes in use don't keep transactions that old. Null without
+ * `ETHERSCAN_API_KEY`, or when the explorer doesn't have it either.
+ */
+export async function getTransactionViaExplorer(
+  network: NetworkKey,
+  txHash: Hex,
+): Promise<{ tx: Transaction; receipt: TransactionReceipt } | null> {
+  if (!env.ETHERSCAN_API_KEY) return null;
+  const call = async (action: string) => {
+    const url = new URL(etherscanApiUrl());
+    url.searchParams.set("chainid", String(getNetwork(network).chain.id));
+    url.searchParams.set("module", "proxy");
+    url.searchParams.set("action", action);
+    url.searchParams.set("txhash", txHash);
+    url.searchParams.set("apikey", env.ETHERSCAN_API_KEY);
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { result?: unknown };
+    return body.result && typeof body.result === "object" ? body.result : null;
+  };
+  try {
+    const [tx, receipt] = await Promise.all([call("eth_getTransactionByHash"), call("eth_getTransactionReceipt")]);
+    if (!tx || !receipt) return null;
+    return { tx: formatTransaction(tx as never), receipt: formatTransactionReceipt(receipt as never) };
+  } catch (err) {
+    logger.warn({ err, network, txHash }, "Explorer transaction lookup failed");
+    return null;
+  }
 }
 
 /**

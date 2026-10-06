@@ -158,8 +158,16 @@ async function write(from: typeof owner, address: Address, name: string, functio
 
 // Fake Etherscan: getcontractcreation for the contracts registered here, empty otherwise.
 const creations = new Map<string, { creator: string; txHash: string }>();
+// Transactions only the explorer has (an RPC with a short transaction index).
+const explorerTxs = new Map<string, { tx: unknown; receipt: unknown }>();
 const etherscanApi = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  if (url.searchParams.get("module") === "proxy") {
+    const known = explorerTxs.get((url.searchParams.get("txhash") ?? "").toLowerCase());
+    const result = !known ? null : url.searchParams.get("action") === "eth_getTransactionByHash" ? known.tx : known.receipt;
+    res.setHeader("content-type", "application/json");
+    return void res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result }));
+  }
   const row = creations.get((url.searchParams.get("contractaddresses") ?? "").toLowerCase());
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(
@@ -441,6 +449,20 @@ check(
   check(
     "/analyze <address> of a factory-made (CREATE2) contract finds the factory call that created it",
     has(textsTo(r, ALICE), new RegExp(`${callHash}`)) && has(textsTo(r, ALICE), new RegExp(`${String(made).toLowerCase()}`, "i")),
+    textsTo(r, ALICE),
+  );
+}
+{
+  // A deploy the RPC doesn't return (pruned history) but the explorer does.
+  const request = chainClient.request as unknown as (a: { method: string; params: unknown[] }) => Promise<Record<string, unknown>>;
+  const tx = await request({ method: "eth_getTransactionByHash", params: [analyzed.hash] });
+  const receipt = await request({ method: "eth_getTransactionReceipt", params: [analyzed.hash] });
+  const ghost = `0x${"7e".repeat(32)}`;
+  explorerTxs.set(ghost, { tx: { ...tx, hash: ghost }, receipt: { ...receipt, transactionHash: ghost } });
+  r = await send(ALICE, `/analyze anvil ${ghost}`);
+  check(
+    "/analyze of a transaction the RPC doesn't have finds it through the explorer and analyzes the contract",
+    has(textsTo(r, ALICE), /АНАЛІЗ КОНТРАКТУ/) && has(textsTo(r, ALICE), new RegExp(analyzed.address, "i")),
     textsTo(r, ALICE),
   );
 }
