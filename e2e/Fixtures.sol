@@ -516,3 +516,35 @@ contract TimedMigrator {
         emit Migrated(msg.sender, amount);
     }
 }
+
+/// QuickSwap-style converter (old QUICK → new QUICK): SWAP_RATIO new tokens per
+/// old one, paid from its own balance. The constant alone doesn't say which way
+/// it applies — a trial exchange does. `closed` makes every exchange revert, so
+/// only the constant and prices are left to read the rate from.
+contract QuickStyleConverter {
+    uint256 public constant SWAP_RATIO = 750;
+    address public quick;
+    address public quickX;
+    bool public closedForTest;
+    event QuickConverted(address indexed user, uint256 quickAmount, uint256 quickXAmount);
+    constructor(address a, address b, bool closed) { quick = a; quickX = b; closedForTest = closed; }
+    function quickToQuickX(uint256 amount) external {
+        require(!closedForTest, "closed");
+        SimpleToken(quick).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(quickX).transfer(msg.sender, amount * SWAP_RATIO);
+        emit QuickConverted(msg.sender, amount, amount * SWAP_RATIO);
+    }
+}
+
+/// A 1:1000 redenomination whose rate is nowhere but in the code.
+contract HiddenRateMigrator {
+    address public oldToken;
+    address public newToken;
+    event Migrated(address indexed user, uint256 amount);
+    constructor(address a, address b) { oldToken = a; newToken = b; }
+    function migrate(uint256 amount) external {
+        SimpleToken(oldToken).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(newToken).transfer(msg.sender, amount * 1000);
+        emit Migrated(msg.sender, amount);
+    }
+}

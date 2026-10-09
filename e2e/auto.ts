@@ -44,6 +44,7 @@ const KNOWN = [
   "migrate()", "startMigration()", "finalizeMigration()", "migrating()",
   "converter()", "convert(uint256)", "convertFromOld(uint256)", "tao()", "legacy()", "underlying()", "legacyToken()", "migrateLegacyMatic(uint256)", "migrateStake(address,uint256)", "stakingToken()",
   "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
+  "quickToQuickX(uint256)", "SWAP_RATIO()", "quick()", "quickX()", "closedForTest()",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -553,7 +554,7 @@ if (rwaRec) console.log("\n=== SAMPLE CUSTODIAN CARD (en) ===\n" + formatMigrati
 console.log("\n=== migration terms & opening ===");
 {
   const { pollOpenings } = await import("../src/chain/migrationOpenWatcher.js");
-  const { formatMigrationOpened } = await import("../src/telegram/notificationFormatter.js");
+  const { formatMigrationOpened, termsLines } = await import("../src/telegram/notificationFormatter.js");
   const nowSec = BigInt((await chain.getBlock()).timestamp);
   const oldA = await token("Legacy A", "LEGA");
   const newA = await token("Fresh A", "FRSA");
@@ -646,6 +647,56 @@ console.log("\n=== migration terms & opening ===");
     openedCard,
   );
   if (openedOpen) console.log("\n=== SAMPLE 'MIGRATION OPENED' CARD (ru) ===\n" + openedCard);
+  check(
+    "rate: a migrator that opens tomorrow is simulated at its start time — 1:1",
+    pendingTerms?.rate?.newPerOld === 1 && pendingTerms.rate.source === "simulated",
+    pendingTerms?.rate,
+  );
+
+  // The rate: never 1:1 by default. QUICK-style SWAP_RATIO() = 750 (new per old),
+  // a 1:1000 redenomination with no rate getter at all.
+  const { termsFor } = await import("../src/analyzer/migrationTerms.js");
+  const oldQ = await token("QuickSwap Old", "QUICK");
+  const newQ = await token("QuickSwap New", "QUICKX");
+  markets.set(lower(oldQ), { low: 0.5, strict: 1, price: 12.25 });
+  markets.set(lower(newQ), { low: 2, strict: 5, price: 0.01064 });
+  const quickOpen = await deploy(stranger, "QuickStyleConverter", [oldQ, newQ, false]);
+  const quickClosed = await deploy(stranger, "QuickStyleConverter", [oldQ, newQ, true]);
+  const oldH = await token("Redenominated Old", "REDO");
+  const newH = await token("Redenominated New", "REDN");
+  markets.set(lower(oldH), { low: 0.3, strict: 0.6, price: 1 });
+  markets.set(lower(newH), { low: 1, strict: 2, price: 0.00105 });
+  const hidden = await deploy(stranger, "HiddenRateMigrator", [oldH, newH]);
+
+  const quickTerms = await termsFor(NETWORK, quickOpen, oldQ, newQ);
+  const quickTrip = quickTerms?.prices?.roundTrip;
+  check(
+    `rate: SWAP_RATIO() = 750 confirmed by a trial exchange on the unfunded converter → 1:750, $300 → $${quickTrip?.outUsd} (not $0.26 at 1:1)`,
+    quickTerms?.rate?.source === "simulated" && quickTerms.rate.newPerOld === 750 &&
+      Math.abs((quickTrip?.outUsd ?? 0) - 191.52) < 0.05 && Math.abs((quickTerms.prices?.spreadPercent ?? 0) - -34.85) < 0.05,
+    quickTerms,
+  );
+  const quickCard = termsLines("ru", quickTerms).join("\n");
+  check(
+    "rate: the card says 1:750, checked by a trial exchange, and trades at it",
+    /🔁 Курс \\\(старый:новый\\\): 1:750 — проверено пробным обменом/.test(quickCard) && /мигрировать 1:750 → продать новый/.test(quickCard) && !markdownV2Problem(quickCard),
+    quickCard,
+  );
+  const closedTerms = await termsFor(NETWORK, quickClosed, oldQ, newQ);
+  check(
+    "rate: no exchange possible → SWAP_RATIO() = 750 read as × 750, the reading prices agree with",
+    closedTerms?.rate?.source === "ratio" && closedTerms.rate.newPerOld === 750 && closedTerms.rate.checked === true &&
+      Math.abs((closedTerms.prices?.roundTrip?.outUsd ?? 0) - 191.52) < 0.05,
+    closedTerms,
+  );
+  const hiddenTerms = await termsFor(NETWORK, hidden, oldH, newH);
+  check(
+    `rate: a 1:1000 redenomination with no rate getter is found by the trial exchange ($300 → $${hiddenTerms?.prices?.roundTrip?.outUsd})`,
+    hiddenTerms?.rate?.source === "simulated" && hiddenTerms.rate.newPerOld === 1000 && hiddenTerms.ratio === null &&
+      Math.abs((hiddenTerms.prices?.roundTrip?.outUsd ?? 0) - 311.85) < 0.05,
+    hiddenTerms,
+  );
+  console.log("\n=== SAMPLE QUICK-STYLE TERMS (ru) ===\n" + quickCard);
 }
 
 // --- load: one block with 150 new contracts, one of them a migration ---------------------------

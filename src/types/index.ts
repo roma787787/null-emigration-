@@ -54,9 +54,17 @@ export interface MigrationTerms {
   endsAt: number | null;
   /** A ratio/rate getter's raw value — its meaning (old per new, scaled…) varies by contract. */
   ratio: { getter: string; value: string } | null;
+  /**
+   * New tokens per old token (whole tokens). simulated: an exchange made in
+   * an eth_call — exact; ratio: the ratio getter, read the way the market
+   * agrees with (checked) or plainly (unchecked); assumed: no rate in the
+   * contract, prices sit near 1:1; market: no rate the contract gives up —
+   * old price ÷ new price, an estimate only.
+   */
+  rate?: { newPerOld: number; source: "simulated" | "ratio" | "assumed" | "market"; checked?: boolean } | null;
   /** New tokens already on the contract to hand out, or minted on exchange (the contract is the new token). */
   funding: { kind: "balance"; amount: string; empty: boolean; symbol: string | null } | { kind: "mint" } | null;
-  /** USD per whole token from $300 test swaps, and buy-old/migrate/sell-new at 1:1 in percent. */
+  /** USD per whole token from $300 test swaps, and buy-old/migrate/sell-new at the rate, in percent. */
   prices: {
     oldUsd: number | null;
     newUsd: number | null;
@@ -67,7 +75,7 @@ export interface MigrationTerms {
     newThin?: boolean;
     /**
      * The trade itself, both sides quoted: $inUsd buys old tokens, migrated
-     * 1:1, sold back for $outUsd (null: no route to sell the new token).
+     * at the rate, sold back for $outUsd (null: no route to sell the new token).
      */
     roundTrip?: { inUsd: number; outUsd: number | null; percent: number | null };
   } | null;

@@ -244,8 +244,8 @@ find migrations. For every block on every enabled network:
    It also shows the **migration terms**, read from the contract where it
    exposes them: status (open / opens `<date>` / paused / ended, from
    `startTime()`, `paused()`, `isActive()`-style getters), the deadline
-   (`endTime()`, `deadline()`…), the ratio (`ratio()`, `rate()`,
-   `LEND_AAVE_RATIO()`… — raw, its meaning varies), the new tokens already on
+   (`endTime()`, `deadline()`…), the **rate** — how many new tokens one old
+   token really gets (below), the new tokens already on
    the contract or "minted on exchange", and both tokens' USD prices with the
    buy-old/migrate/sell-new spread at 1:1 — the old token's from its $300
    test swap, the new token's (often on a thin first pool) from a small
@@ -255,6 +255,27 @@ find migrations. For every block on every enabled network:
    tokens the $300 test swap bought, migrated 1:1, sold back into the
    stablecoin on OKX (`🔄 Trade $300: … = $276.57 (−7.8%)`) — slippage on a
    thin pool is in the number, which two spot prices hide.
+
+   **The rate** is never assumed 1:1. It comes, in order, from:
+   - **a trial exchange** — an `eth_call` in which a probe contract
+     (`src/analyzer/MigrationProbe.sol`, injected by a state override) holds
+     old tokens, approves the migrator and calls its migration function
+     (`migrate(uint256)`, `quickToQuickX(uint256)`…); the new tokens it gets
+     back are the rate, scale and direction included. A migrator that opens
+     later is simulated at its start time; one not yet funded is funded for
+     the call. Nothing is sent. Needs an RPC that accepts `eth_call` state
+     overrides (geth/erigon/reth nodes, Alchemy, publicnode do);
+   - **the ratio getter** (`ratio()`, `rate()`, `SWAP_RATIO()`,
+     `LEND_AAVE_RATIO()`…), read as × r, ÷ r, 1e18-scaled or basis points —
+     whichever old price ÷ new price agrees with (within 2.5×); with no
+     prices to check, × r (or r / 1e18 when that large), marked unchecked;
+   - **prices alone**: no rate in the contract — 1:1 when prices sit within
+     2× of it, otherwise only an estimate ("by prices ≈ 1:1,151 — check the
+     announcement"), and no trade is computed from it.
+
+   The card shows it as `🔁 Rate (old:new): 1:750 — checked by a trial
+   exchange on the contract`, and the spread and the trade use it
+   (`migrate 1:750 → sell new`).
 7. **"Migration opened"** — a second card on the first exchange through an
    alerted contract: the old token sent into it, the new token sent out of it
    (or minted by it), or one of its migration events. Found from logs every

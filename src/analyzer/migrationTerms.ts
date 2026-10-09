@@ -6,6 +6,7 @@ import { quoteTokenFor } from "../config/marketAssets.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
 import { inspectContract } from "./migrationAnalyzer.js";
+import { interpretRatio, newPerOldFromRaw, simulateExchange, type SimulatedExchange } from "./migrationRate.js";
 
 /**
  * The terms a trader needs to act on a migration, read from the contract
@@ -72,9 +73,9 @@ export function priceFromCheck(check: LiquidityCheck | undefined, decimals: numb
   return tokens > 0 ? check.amountUsd / tokens : null;
 }
 
-/** Buy the old token, migrate, sell the new one: what that earns at 1:1, in percent. */
-export function spreadPercent(oldPrice: number | null, newPrice: number | null): number | null {
-  return oldPrice && newPrice ? ((newPrice - oldPrice) / oldPrice) * 100 : null;
+/** Buy the old token, migrate (newPerOld new tokens each), sell the new ones: what that earns, in percent. */
+export function spreadPercent(oldPrice: number | null, newPrice: number | null, newPerOld = 1): number | null {
+  return oldPrice && newPrice ? ((newPrice * newPerOld - oldPrice) / oldPrice) * 100 : null;
 }
 
 /** "1,234,567.89" from a raw amount — never in exponent notation. */
@@ -145,7 +146,32 @@ export async function readMigrationTerms(input: TermsInput): Promise<MigrationTe
       }
     }
 
-    terms.prices = await readPrices(input.network, input.tokenAAddress, input.tokenBAddress, input.tokenACheck);
+    const market = await readMarket(input.network, input.tokenAAddress, input.tokenBAddress, input.tokenACheck);
+    if (market) {
+      const { prices, checkA, decA, decB } = market;
+      // The exchange simulated with what $300 buys — at the start time if it opens later, funded if it holds nothing yet.
+      const simulated =
+        input.tokenAAddress && input.tokenBAddress && decA !== null && decB !== null
+          ? await simulateExchange(client, {
+              contract: at,
+              tokenA: input.tokenAAddress,
+              tokenB: input.tokenBAddress,
+              signatures: input.signatures ?? new Map(),
+              selectors,
+              amount: checkA.status === "pass" && checkA.amountOut ? BigInt(checkA.amountOut) : 10n ** BigInt(decA),
+              at: terms.status === "not_started" && terms.startsAt ? terms.startsAt + 60 : null,
+              fundContract: terms.funding?.kind === "balance",
+            }).catch(() => null)
+          : null;
+      terms.rate = resolveRate(simulated, terms.ratio, decA, decB, prices);
+      const usable = terms.rate && terms.rate.source !== "market" ? terms.rate : null;
+      prices.spreadPercent = usable ? spreadPercent(prices.oldUsd, prices.newUsd, usable.newPerOld) : null;
+      const roundTrip =
+        usable && input.tokenBAddress && prices.newUsd !== null
+          ? await readRoundTrip(input.network, input.tokenBAddress, checkA, decA, decB, usable.newPerOld, simulated)
+          : null;
+      terms.prices = roundTrip ? { ...prices, roundTrip } : prices;
+    }
   } catch (err) {
     logger.warn({ err, network: input.network, contractAddress: at }, "Reading migration terms failed");
   }
@@ -162,18 +188,47 @@ export function priceFromQuote(quote: PriceQuote | null, decimals: number | null
 /** Impact above this on the small price quote marks the market thin. */
 const THIN_IMPACT_PERCENT = 5;
 
+/** No rate in the contract, but prices this close to 1:1 (within 2×) are taken as 1:1. */
+const ONE_TO_ONE_BAND = 2;
+
 /**
- * USD prices of both tokens and the spread at 1:1. The old token's comes
- * from its $300 test swap when that passed; otherwise — and always for the
- * new token, whose market is often thin at first — from a small quote with
- * no impact cap, flagged thin when it moved the price a lot.
+ * The rate a trader can act on: the simulated exchange; else the ratio
+ * getter read the way prices agree with; else, with no rate the contract
+ * gives up, 1:1 when prices sit near it — or the market's own ratio, an
+ * estimate the trade is not computed from.
  */
-export async function readPrices(
+export function resolveRate(
+  simulated: SimulatedExchange | null,
+  ratio: MigrationTerms["ratio"],
+  decA: number | null,
+  decB: number | null,
+  prices: { oldUsd: number | null; newUsd: number | null } | null,
+): MigrationTerms["rate"] {
+  if (decA === null || decB === null) return null;
+  if (simulated) return { newPerOld: newPerOldFromRaw(simulated.received, simulated.spent, decA, decB), source: "simulated" };
+  const market = prices?.oldUsd && prices.newUsd ? prices.oldUsd / prices.newUsd : null;
+  if (ratio) {
+    const read = interpretRatio(BigInt(ratio.value), decA, decB, market);
+    if (read) return { newPerOld: read.newPerOld, source: "ratio", checked: read.checked };
+    return market ? { newPerOld: market, source: "market" } : null;
+  }
+  if (!market) return null;
+  return market <= ONE_TO_ONE_BAND && market >= 1 / ONE_TO_ONE_BAND ? { newPerOld: 1, source: "assumed" } : { newPerOld: market, source: "market" };
+}
+
+/**
+ * USD prices of both tokens. The old token's comes from its $300 test swap
+ * when that passed; otherwise — and always for the new token, whose market
+ * is often thin at first — from a small quote with no impact cap, flagged
+ * thin when it moved the price a lot. The spread and the trade come after,
+ * once the rate is known.
+ */
+async function readMarket(
   network: NetworkKey,
   tokenA: Address | null,
   tokenB: Address | null,
   tokenACheck?: LiquidityCheck,
-): Promise<MigrationTerms["prices"]> {
+): Promise<{ prices: NonNullable<MigrationTerms["prices"]>; checkA: LiquidityCheck; decA: number | null; decB: number | null } | null> {
   if (!tokenA) return null;
   const client = getPublicClient(network);
   const checkA = tokenACheck ?? (await checkLiquidity(network, tokenA, "LOW_CAP"));
@@ -189,27 +244,32 @@ export async function readPrices(
   const newUsd = priceFromQuote(qB, decB);
   const newThin = (qB?.impactPercent ?? 0) > THIN_IMPACT_PERCENT;
   if (oldUsd === null && newUsd === null) return null;
-  const roundTrip = tokenB && newUsd !== null ? await readRoundTrip(network, tokenB, checkA, decA, decB) : null;
   return {
-    oldUsd,
-    newUsd,
-    spreadPercent: spreadPercent(oldUsd, newUsd),
-    at: Date.now(),
-    ...(oldThin && oldUsd !== null ? { oldThin } : {}),
-    ...(newThin && newUsd !== null ? { newThin } : {}),
-    ...(roundTrip ? { roundTrip } : {}),
+    prices: {
+      oldUsd,
+      newUsd,
+      spreadPercent: null,
+      at: Date.now(),
+      ...(oldThin && oldUsd !== null ? { oldThin } : {}),
+      ...(newThin && newUsd !== null ? { newThin } : {}),
+    },
+    checkA,
+    decA,
+    decB,
   };
 }
 
-/** Old tokens' raw amount as the same number of whole new tokens (1:1), across decimals. */
-export function sameAmountIn(raw: bigint, fromDecimals: number, toDecimals: number): bigint {
-  return toDecimals >= fromDecimals ? raw * 10n ** BigInt(toDecimals - fromDecimals) : raw / 10n ** BigInt(fromDecimals - toDecimals);
+/** Raw old tokens as raw new tokens at newPerOld new per old (whole tokens), across decimals. */
+export function migratedAmount(raw: bigint, fromDecimals: number, toDecimals: number, newPerOld = 1): bigint {
+  const rate = BigInt(Math.round(newPerOld * 1e12));
+  return (raw * rate * 10n ** BigInt(toDecimals)) / (10n ** 12n * 10n ** BigInt(fromDecimals));
 }
 
 /**
  * The migration trade quoted on both sides: what Token A's $300 test swap
- * bought, migrated 1:1, sold back into the stablecoin. Thin pools and
- * slippage both ways are in the number — unlike the spread of two prices.
+ * bought, migrated at the rate (the simulated exchange's own output when
+ * there is one), sold back into the stablecoin. Thin pools and slippage both
+ * ways are in the number — unlike the spread of two prices.
  */
 async function readRoundTrip(
   network: NetworkKey,
@@ -217,10 +277,13 @@ async function readRoundTrip(
   checkA: LiquidityCheck,
   decA: number | null,
   decB: number | null,
+  newPerOld: number,
+  simulated: SimulatedExchange | null,
 ): Promise<NonNullable<MigrationTerms["prices"]>["roundTrip"] | null> {
   const stable = quoteTokenFor(network);
   if (checkA.status !== "pass" || !checkA.amountOut || decA === null || decB === null || !stable) return null;
-  const newRaw = sameAmountIn(BigInt(checkA.amountOut), decA, decB);
+  const bought = BigInt(checkA.amountOut);
+  const newRaw = simulated ? (bought * simulated.received) / simulated.spent : migratedAmount(bought, decA, decB, newPerOld);
   const sold = await quoteSwap(network, tokenB, stable.address, newRaw);
   if (!sold) return { inUsd: checkA.amountUsd, outUsd: null, percent: null };
   const outUsd = Number((sold.amountOut * 100n) / 10n ** BigInt(stable.decimals)) / 100;
