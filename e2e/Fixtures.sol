@@ -548,3 +548,27 @@ contract HiddenRateMigrator {
         emit Migrated(msg.sender, amount);
     }
 }
+
+/// PHAR → p33-style zap (French names, as found on Avalanche): converts the old
+/// token into a token worth more than one old each — 0.64 per old token — with
+/// a recipient and route data. Priced 1.56× apart, it looks like a 1:1
+/// migration with +56% on top; only the trial exchange shows the 0.64.
+contract ZapConverterFr {
+    address public phar;
+    address public p33;
+    event Converti(address indexed user, uint256 amount, uint256 shares);
+    constructor(address a, address b) { phar = a; p33 = b; }
+    function convertir(uint256 amount, address to, bytes calldata) external {
+        _convert(amount, to, 0);
+    }
+    function convertirSousPlancher(uint256 amount, address to, bytes calldata, uint256 minOut) external {
+        _convert(amount, to, minOut);
+    }
+    function _convert(uint256 amount, address to, uint256 minOut) internal {
+        uint256 shares = amount * 64 / 100;
+        require(shares >= minOut, "plancher");
+        SimpleToken(phar).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(p33).transfer(to, shares);
+        emit Converti(msg.sender, amount, shares);
+    }
+}

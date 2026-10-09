@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { formatAmount, migratedAmount, priceFromCheck, priceFromQuote, resolveRate, spreadPercent } from "./migrationTerms.js";
-import { exchangeCalls, interpretRatio, newPerOldFromRaw, PROBE_ADDRESS } from "./migrationRate.js";
+import { exchangeCalls, fillCall, interpretRatio, newPerOldFromRaw, PROBE_ADDRESS } from "./migrationRate.js";
+import { decodeAbiParameters } from "viem";
 import { formatRatePair } from "../telegram/notificationFormatter.js";
 import { toFunctionSelector, type Hex } from "viem";
 import { formatSpread, formatUsd, formatUtc, termsLines } from "../telegram/notificationFormatter.js";
@@ -57,6 +58,8 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
     { ...base, ratio: { getter: "rate()", value: "3" }, rate: { newPerOld: 1151.3, source: "market" }, prices: { oldUsd: 12.25, newUsd: 0.01064, spreadPercent: null, at: 0 } },
     { ...base, ratio: { getter: "rate()", value: "750" }, rate: { newPerOld: 750, source: "ratio", checked: false }, prices: null },
     { ...base, rate: { newPerOld: 1, source: "assumed" }, prices: null },
+    { ...base, rate: { newPerOld: 1, source: "assumed" }, prices: { oldUsd: 0.1042, newUsd: 0.1622, spreadPercent: 55.7, at: 0, roundTrip: { inUsd: 300, outUsd: 458.22, percent: 52.74 } } },
+    { ...base, rate: null, prices: { oldUsd: 0.02845, newUsd: null, spreadPercent: null, at: 0 } },
   ];
   for (const lang of ["en", "uk", "ru"] as const) {
     for (const terms of shapes) {
@@ -81,7 +84,11 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
   assert.match(termsLines("en", shapes[12]!).join("\n"), /not stated in the contract; by prices ≈ 1:1,151/);
   assert.match(termsLines("en", shapes[13]!).join("\n"), /rate\\\(\\\) \\= 3 doesn't match prices/);
   assert.match(termsLines("en", shapes[14]!).join("\n"), /1:750 — from rate\\\(\\\) \\= 750, read as a multiplier/);
-  assert.match(termsLines("ru", shapes[15]!).join("\n"), /1:1 — в контракте не указан, цены рядом/);
+  assert.match(termsLines("ru", shapes[15]!).join("\n"), /1:1 НЕ подтверждён — в контракте курса нет, пробный обмен не прошёл/);
+  // PHAR → p33: no rate anywhere, prices 1.56× apart — the trade at 1:1 is marked unconfirmed.
+  const phar = termsLines("en", shapes[16]!).join("\n");
+  assert.match(phar, /migrate 1:1 → sell new \\= \$458\\\.22 \\\(\\\+52\\\.7%\\\) _\\\(1:1 not confirmed\\\)_/);
+  assert.match(termsLines("ru", shapes[17]!).join("\n"), /🔁 Курс \\\(старый:новый\\\): неизвестен — в контракте не указан, пробный обмен не прошёл/);
   assert.deepEqual(termsLines("en", null), []);
 });
 
@@ -130,6 +137,7 @@ test("rates are written old:new", () => {
   assert.equal(formatRatePair(750), "1:750");
   assert.equal(formatRatePair(1151.3), "1:1,151");
   assert.equal(formatRatePair(1.5), "1:1.5");
+  assert.equal(formatRatePair(0.64), "1:0.64");
   assert.equal(formatRatePair(0.001), "1,000:1");
 });
 
@@ -143,4 +151,26 @@ test("the exchange is tried through the contract's migration functions only", ()
   assert.ok(calls[0]!.startsWith(toFunctionSelector("quickToQuickX(uint256)")));
   assert.ok(calls.some((c) => c.includes(PROBE_ADDRESS.slice(2).toLowerCase())));
   assert.ok(calls.some((c) => c.includes(tokenA.slice(2))));
+});
+
+test("trial-exchange arguments are filled the way a holder would", () => {
+  const tokenA = "0x13a466998ce03db73abc2d4df3bbd845ed1f28e7";
+  const sel = (sig: string) => toFunctionSelector(sig) as Hex;
+  // PHAR's convertir(amount, to, data): amount, the probe as recipient, empty bytes — and once with Token A.
+  const convertir = fillCall(sel("convertir(uint256,address,bytes)"), "convertir(uint256,address,bytes)", tokenA, 7n)!;
+  assert.equal(convertir.length, 2);
+  const [amount, to, data] = decodeAbiParameters([{ type: "uint256" }, { type: "address" }, { type: "bytes" }], `0x${convertir[0]!.slice(10)}`);
+  assert.equal(amount, 7n);
+  assert.equal(to.toLowerCase(), PROBE_ADDRESS.toLowerCase());
+  assert.equal(data, "0x");
+  // A floor/deadline argument after the amount: tried as 0 and as a far deadline.
+  const floor = fillCall(sel("convertirSousPlancher(uint256,address,bytes,uint256)"), "convertirSousPlancher(uint256,address,bytes,uint256)", tokenA, 7n)!;
+  assert.equal(floor.length, 3);
+  assert.equal(fillCall(sel("batch(address[])"), "batch(address[])", tokenA, 7n), null);
+  // CPOOL's swap(uint256) is tried; a bare swap() or setter is not.
+  const sigs = ["swap(uint256)", "swap()", "setFee(uint256)", "convertir(uint256,address,bytes)"];
+  const signatures = new Map(sigs.map((s) => [toFunctionSelector(s) as string, s]));
+  const calls = exchangeCalls(signatures, [...signatures.keys()] as Hex[], tokenA, 7n);
+  assert.equal(calls.length, 3);
+  assert.ok(calls[0]!.startsWith(sel("swap(uint256)")));
 });

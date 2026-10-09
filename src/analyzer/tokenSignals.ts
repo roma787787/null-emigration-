@@ -1,4 +1,4 @@
-import { decodeFunctionResult, toFunctionSelector, type Address, type Hex, type PublicClient } from "viem";
+import { concat, decodeFunctionResult, pad, toFunctionSelector, toHex, type Address, type Hex, type PublicClient } from "viem";
 import type { NetworkKey } from "../types/index.js";
 import { isBaseAsset } from "../config/marketAssets.js";
 
@@ -99,6 +99,27 @@ export async function wrapsBaseAsset(client: PublicClient, network: NetworkKey, 
     }
   }
   return false;
+}
+
+const ASSET = toFunctionSelector("asset()");
+const CONVERT_TO_ASSETS = toFunctionSelector("convertToAssets(uint256)");
+
+/**
+ * An ERC-4626 vault share (asset() + convertToAssets): a contract "converting"
+ * into one is a deposit — PHAR into p33, SHADOW into x33 — whose shares are
+ * worth more than one underlying each, not a migration to a new token.
+ */
+export async function isVaultShare(client: PublicClient, token: Address): Promise<boolean> {
+  try {
+    const [asset, assets] = await Promise.all([
+      client.call({ to: token, data: ASSET }),
+      client.call({ to: token, data: concat([CONVERT_TO_ASSETS, pad(toHex(10n ** 18n))]) }),
+    ]);
+    const underlying = asset.data && asset.data.length === 66 ? BigInt(asset.data) : 0n;
+    return underlying > 0n && underlying < 2n ** 160n && !!assets.data && assets.data.length === 66;
+  } catch {
+    return false;
+  }
 }
 
 // migrate<Object> where the object is a position, not a token: staking,

@@ -67,25 +67,65 @@ export async function findBalanceSlot(client: PublicClient, token: Address, hold
   }
 }
 
+/** A far-off unix time, for an argument that is a deadline. */
+const FAR_DEADLINE = 4_102_444_800n;
+const MAX_CALLS = 8;
+
+/**
+ * One function's calls with every argument filled the way a holder would:
+ * the first uint the amount, later uints a minimum out (0) or a deadline,
+ * addresses the probe itself (the recipient) — or Token A, for
+ * `migrate(address token, uint256)` — bytes empty, flags false. Arrays and
+ * structs are left alone (null).
+ */
+export function fillCall(selector: Hex, sig: string, tokenA: Address, amount: bigint): Hex[] | null {
+  const name = sig.split("(")[0] ?? "";
+  const args = sig.slice(name.length + 1, -1);
+  const types = args === "" ? [] : args.split(",");
+  if (types.some((t) => !/^(uint\d*|int\d*|address|bytes\d*|bool)$/.test(t))) return null;
+  const build = (extraUint: bigint, firstAddress: Address) => {
+    let amountUsed = false;
+    let addressUsed = false;
+    const values = types.map((t) => {
+      if (/^u?int/.test(t)) {
+        if (amountUsed) return extraUint;
+        amountUsed = true;
+        return amount;
+      }
+      if (t === "address") {
+        const v = addressUsed ? PROBE_ADDRESS : firstAddress;
+        addressUsed = true;
+        return v;
+      }
+      if (t === "bool") return false;
+      if (t === "bytes") return "0x";
+      return pad("0x00", { size: Number(t.slice(5)) as 32 });
+    });
+    return types.length === 0 ? selector : concat([selector, encodeAbiParameters(types.map((type) => ({ type })), values)]);
+  };
+  const uints = types.filter((t) => /^u?int/.test(t)).length;
+  const calls = [build(0n, PROBE_ADDRESS)];
+  if (uints > 1) calls.push(build(FAR_DEADLINE, PROBE_ADDRESS));
+  if (types.includes("address")) calls.push(build(0n, tokenA));
+  return calls;
+}
+
+/** Functions a holder exchanges through: migrate/convert (in any language: convertir), xToY pairs, swap/exchange/upgrade. */
+const EXCHANGE_NAME = /^(swap|exchange|upgrade|redeem)(Tokens?|Old|Legacy|V\d+)?$/i;
+
 /** The calls a holder would make to exchange `amount`, from the contract's functions. */
 export function exchangeCalls(signatures: Map<string, string>, selectors: Hex[], tokenA: Address, amount: bigint): Hex[] {
   const calls: Hex[] = [];
   for (const [selector, sig] of signatures) {
     if (!selectors.includes(selector as Hex)) continue;
     const name = sig.split("(")[0] ?? "";
-    // migrate(…)/convert(…) and the old-to-new pairs named after both tokens: quickToQuickX, mkrToSky.
-    if (!isMigrationAction(sig) && !/^[a-z][A-Za-z0-9]*To[A-Z][A-Za-z0-9]*$/.test(name)) continue;
-    const args = sig.slice(name.length + 1, -1);
-    const enc = (types: string[], values: unknown[]) => concat([selector as Hex, encodeAbiParameters(types.map((type) => ({ type })), values)]);
-    if (args === "") calls.push(selector as Hex);
-    else if (args === "uint256") calls.push(enc(["uint256"], [amount]));
-    else if (args === "uint256,address") calls.push(enc(["uint256", "address"], [amount, PROBE_ADDRESS]));
-    else if (args === "address,uint256") {
-      calls.push(enc(["address", "uint256"], [PROBE_ADDRESS, amount]));
-      calls.push(enc(["address", "uint256"], [tokenA, amount]));
-    }
+    if (!isMigrationAction(sig) && !/^[a-z][A-Za-z0-9]*To[A-Z][A-Za-z0-9]*$/.test(name) && !EXCHANGE_NAME.test(name)) continue;
+    // A function that takes no amount moves the caller's whole balance; one with
+    // only addresses (migrate(address)) is a settings call more often than not.
+    if (sig.endsWith("()") && !isMigrationAction(sig)) continue;
+    calls.push(...(fillCall(selector as Hex, sig, tokenA, amount) ?? []));
   }
-  return calls.slice(0, 6);
+  return calls.slice(0, MAX_CALLS);
 }
 
 export interface SimulatedExchange {

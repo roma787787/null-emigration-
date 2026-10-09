@@ -260,7 +260,10 @@ find migrations. For every block on every enabled network:
    - **a trial exchange** — an `eth_call` in which a probe contract
      (`src/analyzer/MigrationProbe.sol`, injected by a state override) holds
      old tokens, approves the migrator and calls its migration function
-     (`migrate(uint256)`, `quickToQuickX(uint256)`…); the new tokens it gets
+     (`migrate(uint256)`, `quickToQuickX(uint256)`, `swap(uint256)`,
+     `convertir(uint256,address,bytes)`… — arguments filled as a holder
+     would: the amount, itself as recipient, empty route data, 0 or a far
+     deadline for later numbers); the new tokens it gets
      back are the rate, scale and direction included. A migrator that opens
      later is simulated at its start time; one not yet funded is funded for
      the call. Nothing is sent. Needs an RPC that accepts `eth_call` state
@@ -270,8 +273,13 @@ find migrations. For every block on every enabled network:
      whichever old price ÷ new price agrees with (within 2.5×); with no
      prices to check, × r (or r / 1e18 when that large), marked unchecked;
    - **prices alone**: no rate in the contract — 1:1 when prices sit within
-     2× of it, otherwise only an estimate ("by prices ≈ 1:1,151 — check the
+     2× of it, marked **not confirmed** on the card and the trade line;
+     otherwise only an estimate ("by prices ≈ 1:1,151 — check the
      announcement"), and no trade is computed from it.
+
+   With none of these the card says the rate is unknown. A migrator whose
+   new token is an ERC-4626 vault share (PHAR → p33, SHADOW → x33) is a
+   deposit, not a migration, and is not alerted.
 
    The card shows it as `🔁 Rate (old:new): 1:750 — checked by a trial
    exchange on the contract`, and the spread and the trade use it

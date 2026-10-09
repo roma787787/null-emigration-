@@ -87,17 +87,18 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(digits)}`;
 }
 
-/** "1:750", "1:1.5", "1,000:1" — new tokens per old one as old:new. */
+/** "1:750", "1:1.5", "1:0.64", "1,000:1" — new tokens per old one as old:new. */
 export function formatRatePair(newPerOld: number): string {
   const n = (x: number) => (x >= 1000 ? Math.round(x).toLocaleString("en-US") : String(Number(x.toPrecision(4))));
-  return newPerOld >= 1 ? `1:${n(newPerOld)}` : `${n(1 / newPerOld)}:1`;
+  // Below 1:0.01 the other way round reads better: 1,000:1, not 1:0.001.
+  return newPerOld >= 0.01 ? `1:${n(newPerOld)}` : `${n(1 / newPerOld)}:1`;
 }
 
 /** The rate a trade is computed at: the resolved one, or 1:1 for terms stored before rates were read. */
-function tradePair(terms: MigrationTerms | null | undefined): { pair: string; legacyNote: boolean } {
+function tradePair(terms: MigrationTerms | null | undefined): { pair: string; note: "card.spreadCheckRatio" | "card.rateUnconfirmed" | null } {
   const rate = terms?.rate;
-  if (rate && rate.source !== "market") return { pair: formatRatePair(rate.newPerOld), legacyNote: false };
-  return { pair: "1:1", legacyNote: rate === undefined && !!terms?.ratio };
+  if (rate && rate.source !== "market") return { pair: formatRatePair(rate.newPerOld), note: rate.source === "assumed" ? "card.rateUnconfirmed" : null };
+  return { pair: "1:1", note: rate === undefined && terms?.ratio ? "card.spreadCheckRatio" : null };
 }
 
 /** The 🔁 line: the rate and where it comes from. */
@@ -112,8 +113,7 @@ function rateLine(lang: Language, terms: MigrationTerms): string | null {
     return `🔁 ${escapeMd(t(lang, "card.ratio"))}: ${escapeMd(`${getter} = ${value}`)} _\\(${escapeMd(t(lang, "card.ratioNote"))}\\)_`;
   }
   if (rate === null) {
-    if (!terms.ratio) return null;
-    text = `${getter} = ${value} (${t(lang, "card.ratioNote")})`;
+    text = terms.ratio ? `${getter} = ${value} (${t(lang, "card.ratioNote")})` : t(lang, "card.rateUnknown");
   } else {
     const pair = formatRatePair(rate.newPerOld);
     text =
@@ -141,8 +141,8 @@ export function pricesLine(lang: Language, terms: MigrationTerms | null | undefi
   ];
   // With the trade quoted both ways, the round trip replaces the spread of two prices.
   if (prices.spreadPercent !== null && !prices.roundTrip) {
-    const { pair, legacyNote } = tradePair(terms);
-    parts.push(t(lang, "card.spread", { spread: formatSpread(prices.spreadPercent), pair }) + (legacyNote ? ` (${t(lang, "card.spreadCheckRatio")})` : ""));
+    const { pair, note } = tradePair(terms);
+    parts.push(t(lang, "card.spread", { spread: formatSpread(prices.spreadPercent), pair }) + (note ? ` (${t(lang, note)})` : ""));
   }
   return `💱 ${escapeMd(t(lang, "card.prices"))}: ${escapeMd(parts.join(" · "))}`;
 }
@@ -173,12 +173,12 @@ export function termsLines(lang: Language, terms: MigrationTerms | null | undefi
   if (prices) lines.push(prices);
   const trip = terms.prices?.roundTrip;
   if (trip) {
-    const { pair, legacyNote } = tradePair(terms);
+    const { pair, note } = tradePair(terms);
     const text =
       trip.outUsd === null || trip.percent === null
         ? t(lang, "card.roundTripNoRoute", { in: formatUsd(trip.inUsd), pair })
         : t(lang, "card.roundTrip", { in: formatUsd(trip.inUsd), out: formatUsd(trip.outUsd), pct: formatSpread(trip.percent), pair });
-    lines.push(`🔄 ${escapeMd(text)}${legacyNote ? ` _\\(${escapeMd(t(lang, "card.spreadCheckRatio"))}\\)_` : ""}`);
+    lines.push(`🔄 ${escapeMd(text)}${note ? ` _\\(${escapeMd(t(lang, note))}\\)_` : ""}`);
   }
   return lines;
 }

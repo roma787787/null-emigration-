@@ -13,6 +13,7 @@ import {
   hasBotCallbacks,
   hasOldTokenGetter,
   isErc4626Vault,
+  isVaultShare,
   isLaunchpadToken,
   isLiquidityPool,
   isMigrationAction,
@@ -199,6 +200,9 @@ export async function analyzeAutoCandidate(
   // (neither an address nor a ticker) it isn't alertable yet — look again
   // later, in case the target is set after deploy.
   if (!tokenBAddress && !symbolOnly) return { kind: "skipped", reason: "no Token B", recheck: true };
+  if (tokenB && !isToken && (await isVaultShare(client, tokenB.address))) {
+    return { kind: "skipped", reason: "Token B is a vault share (a deposit, not a migration)" };
+  }
 
   const matchedAuxiliary = await probeAuxiliarySignals(client, contractAddress).catch((err) => {
     logger.warn({ err, network, contractAddress }, "Auxiliary signal probe failed");

@@ -45,6 +45,7 @@ const KNOWN = [
   "converter()", "convert(uint256)", "convertFromOld(uint256)", "tao()", "legacy()", "underlying()", "legacyToken()", "migrateLegacyMatic(uint256)", "migrateStake(address,uint256)", "stakingToken()",
   "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
   "quickToQuickX(uint256)", "SWAP_RATIO()", "quick()", "quickX()", "closedForTest()",
+  "convertir(uint256,address,bytes)", "convertirSousPlancher(uint256,address,bytes,uint256)", "phar()", "p33()",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -423,6 +424,11 @@ cases.push({
 // The first real false positives from production (ERC-4626 vaults, a four.meme-style token).
 cases.push({ label: "ERC-4626 vault over a liquid asset (gtWETH / USDG vault shape) → ignored", address: await deployTimed(stranger, "Erc4626LikeVault", [realLend]), expect: expectNone });
 cases.push({ label: "ERC-4626 vault that also has migrate(uint256) (MATIC vault shape) → ignored", address: await deployTimed(stranger, "VaultWithMigrate", [realLend]), expect: expectNone });
+cases.push({
+  label: "migrator whose new token is an ERC-4626 vault share (PHAR → p33, SHADOW → x33: a deposit) → ignored",
+  address: await deployTimed(stranger, "MigratorWithGetters", [realLend, await deploy(owner, "Erc4626LikeVault", [realLend])]),
+  expect: expectNone,
+});
 cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });
 // Ethereum backfill, 7 days: 12 would-be alerts, most of them these shapes.
 cases.push({
@@ -695,6 +701,20 @@ console.log("\n=== migration terms & opening ===");
     hiddenTerms?.rate?.source === "simulated" && hiddenTerms.rate.newPerOld === 1000 && hiddenTerms.ratio === null &&
       Math.abs((hiddenTerms.prices?.roundTrip?.outUsd ?? 0) - 311.85) < 0.05,
     hiddenTerms,
+  );
+  // PHAR → p33 (Avalanche): convertir(amount, to, data) at 0.64, prices 1.56× apart. At 1:1 it read +52.7%.
+  const phar = await token("Pharaoh", "PHAR");
+  const p33 = await token("p33", "p33");
+  markets.set(lower(phar), { low: 0.3, strict: 1.7, price: 0.1042 });
+  markets.set(lower(p33), { low: 1, strict: 2, price: 0.1622 });
+  const zap = await deploy(stranger, "ZapConverterFr", [phar, p33]);
+  const zapTerms = await termsFor(NETWORK, zap, phar, p33);
+  const zapTrip = zapTerms?.prices?.roundTrip;
+  check(
+    `rate: convertir(uint256,address,bytes) is tried with a recipient and empty data → 1:0.64, $300 → $${zapTrip?.outUsd} (${zapTrip?.percent?.toFixed(1)}%), not +52.7% at 1:1`,
+    zapTerms?.rate?.source === "simulated" && Math.abs(zapTerms.rate.newPerOld - 0.64) < 1e-9 &&
+      Math.abs((zapTrip?.outUsd ?? 0) - 295.88) < 0.05 && /1:0\\\.64 — checked by a trial exchange/.test(termsLines("en", zapTerms).join("\n")),
+    zapTerms,
   );
   console.log("\n=== SAMPLE QUICK-STYLE TERMS (ru) ===\n" + quickCard);
 }
