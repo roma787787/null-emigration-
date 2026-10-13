@@ -572,3 +572,20 @@ contract ZapConverterFr {
         emit Converti(msg.sender, amount, shares);
     }
 }
+
+/// Yearn-style yield strategy over CVX (Convex): migrate(address newStrategy)
+/// moves the vault's funds, want() is the farmed token, vault() the share
+/// token; inactive until the vault adds it. Not a token migration.
+contract YearnStyleStrategy {
+    address public want;
+    address public vault;
+    address public strategist;
+    constructor(address w, address v) { want = w; vault = v; strategist = msg.sender; }
+    function isActive() external pure returns (bool) { return false; }
+    function estimatedTotalAssets() external view returns (uint256) { return SimpleToken(want).balanceOf(address(this)); }
+    function harvest() external {}
+    function migrate(address newStrategy) external {
+        require(msg.sender == vault, "!vault");
+        SimpleToken(want).transfer(newStrategy, SimpleToken(want).balanceOf(address(this)));
+    }
+}

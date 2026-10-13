@@ -46,6 +46,7 @@ const KNOWN = [
   "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
   "quickToQuickX(uint256)", "SWAP_RATIO()", "quick()", "quickX()", "closedForTest()",
   "convertir(uint256,address,bytes)", "convertirSousPlancher(uint256,address,bytes,uint256)", "phar()", "p33()",
+  "want()", "vault()", "strategist()", "isActive()", "estimatedTotalAssets()", "harvest()",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -427,6 +428,11 @@ cases.push({ label: "ERC-4626 vault that also has migrate(uint256) (MATIC vault 
 cases.push({
   label: "migrator whose new token is an ERC-4626 vault share (PHAR → p33, SHADOW → x33: a deposit) → ignored",
   address: await deployTimed(stranger, "MigratorWithGetters", [realLend, await deploy(owner, "Erc4626LikeVault", [realLend])]),
+  expect: expectNone,
+});
+cases.push({
+  label: "Yearn-style yield strategy over a traded token: migrate(address newStrategy), want(), vault() (CVX strategy shape) → ignored",
+  address: await deployTimed(stranger, "YearnStyleStrategy", [realLend, newToken2]),
   expect: expectNone,
 });
 cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });

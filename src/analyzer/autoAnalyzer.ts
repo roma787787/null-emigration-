@@ -14,6 +14,7 @@ import {
   hasOldTokenGetter,
   isErc4626Vault,
   isVaultShare,
+  isVaultStrategy,
   isLaunchpadToken,
   isLiquidityPool,
   isMigrationAction,
@@ -110,6 +111,7 @@ export async function analyzeAutoCandidate(
   if (isErc4626Vault(selectors)) return { kind: "skipped", reason: "ERC-4626 vault" };
   if (hasBotCallbacks(selectors)) return { kind: "skipped", reason: "swap / flash-loan callbacks (bot)" };
   if (isLaunchpadToken(selectors)) return { kind: "skipped", reason: "launchpad token (pool graduation settings)" };
+  if (isVaultStrategy(selectors)) return { kind: "skipped", reason: "yield strategy (migrate moves a vault's funds)" };
   if (!implementation && looksLikeProxy(selectors) && strong.length === 0) {
     return { kind: "skipped", reason: "proxy without implementation", recheck: true };
   }

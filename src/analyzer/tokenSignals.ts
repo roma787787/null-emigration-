@@ -65,6 +65,22 @@ export function hasBotCallbacks(selectors: Hex[]): boolean {
   return BOT_CALLBACKS.some((s) => selectors.includes(s));
 }
 
+// Yield strategies (Yearn BaseStrategy and its many copies: Convex, Curve,
+// StakeDAO strategies): `migrate(address newStrategy)` moves the vault's funds
+// to a new strategy contract, `want()` is the token farmed, `vault()` the
+// share token — plumbing between a protocol's own contracts, not a token
+// migration anyone can use.
+const sel = (sig: string) => toFunctionSelector(sig);
+const STRATEGY_ONLY = ["estimatedTotalAssets()", "harvestTrigger(uint256)", "tendTrigger(uint256)", "harvestTrigger(uint256,uint256)"].map(sel);
+const [WANT, VAULT, HARVEST, STRATEGIST] = ["want()", "vault()", "harvest()", "strategist()"].map(sel);
+
+export function isVaultStrategy(selectors: Hex[]): boolean {
+  const has = (s: Hex) => selectors.includes(s);
+  if (STRATEGY_ONLY.some(has)) return true;
+  if (has(WANT!) && has(VAULT!)) return true;
+  return has(HARVEST!) && (has(WANT!) || has(VAULT!) || has(STRATEGIST!));
+}
+
 // Launchpad (four.meme-style) tokens: settings for the pool the token
 // "migrates" to when its bonding curve graduates — liquidity plumbing, not a
 // token migration, whatever else the token calls a function.

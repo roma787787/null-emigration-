@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toFunctionSelector } from "viem";
+import { toFunctionSelector, type Hex } from "viem";
 import { isErc4626Vault, isMigrationAction } from "./tokenSignals.js";
 
 test("migration actions count; settings, flags, views and ERC-4626 conversions don't", () => {
@@ -68,4 +68,16 @@ test("bridged blue chips are base assets: BTCB and Binance-Peg ETH on BSC, WBTC 
   assert.equal(isBaseAsset("base", "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"), true); // cbBTC
   assert.equal(isBaseAsset("arbitrum", "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f"), true); // WBTC
   assert.equal(isBaseAsset("bsc", "0x9DBC36B85b4EFB9E7Aa25FbDb913Ba6C52999999"), false); // an ordinary token
+});
+
+test("yield strategies (migrate(address newStrategy), want(), vault()) are told from migrators", async () => {
+  const { isVaultStrategy } = await import("./tokenSignals.js");
+  const sel = (s: string) => toFunctionSelector(s) as Hex;
+  // Yearn BaseStrategy (the CVX alert): want() + vault() + harvest() + migrate(address).
+  assert.equal(isVaultStrategy([sel("migrate(address)"), sel("want()"), sel("vault()"), sel("harvest()")]), true);
+  assert.equal(isVaultStrategy([sel("migrate(address)"), sel("estimatedTotalAssets()")]), true);
+  assert.equal(isVaultStrategy([sel("harvest()"), sel("strategist()")]), true);
+  // A migrator with a vault() pointer alone, or harvest() alone, is not one.
+  assert.equal(isVaultStrategy([sel("migrate(uint256)"), sel("oldToken()"), sel("newToken()"), sel("vault()")]), false);
+  assert.equal(isVaultStrategy([sel("migrate(uint256)"), sel("harvest()")]), false);
 });

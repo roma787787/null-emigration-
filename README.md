@@ -279,7 +279,10 @@ find migrations. For every block on every enabled network:
 
    With none of these the card says the rate is unknown. A migrator whose
    new token is an ERC-4626 vault share (PHAR → p33, SHADOW → x33) is a
-   deposit, not a migration, and is not alerted.
+   deposit, not a migration, and is not alerted — nor is a yield strategy
+   (Yearn's BaseStrategy and its copies: `want()` + `vault()`, `harvest()`,
+   `estimatedTotalAssets()`), whose `migrate(address newStrategy)` moves a
+   vault's funds between the protocol's own contracts.
 
    The card shows it as `🔁 Rate (old:new): 1:750 — checked by a trial
    exchange on the contract`, and the spread and the trade use it
