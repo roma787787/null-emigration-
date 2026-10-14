@@ -284,6 +284,15 @@ find migrations. For every block on every enabled network:
    `estimatedTotalAssets()`), whose `migrate(address newStrategy)` moves a
    vault's funds between the protocol's own contracts.
 
+   **Where to migrate**: a `🚀 Migrate` line links the migration contract's
+   *Write Contract* tab on the explorer when its source is verified there
+   (`ETHERSCAN_API_KEY`; `#writeProxyContract` for a proxy) — call the
+   migration function from a wallet, after approving the old token — and the
+   project's site from the token's DexScreener profile (new token first, else
+   the old one; `DEXSCREENER_API_URL=off` turns the lookup off). The
+   confidence label stays internal (it drives `/settings` filters) and is no
+   longer printed on the card.
+
    The card shows it as `🔁 Rate (old:new): 1:750 — checked by a trial
    exchange on the contract`, and the spread and the trade use it
    (`migrate 1:750 → sell new`).

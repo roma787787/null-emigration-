@@ -54,6 +54,35 @@ export async function getContractCreation(network: NetworkKey, contractAddress: 
 }
 
 /**
+ * Whether the explorer has the contract's source verified — then its "Write
+ * Contract" tab lets anyone call migrate() from a wallet — and whether it is a
+ * proxy (the tab is "Write as Proxy"). Null without a key, or when the
+ * explorer API doesn't answer for this network.
+ */
+export async function getContractVerification(
+  network: NetworkKey,
+  contractAddress: Address,
+): Promise<{ verified: boolean; proxy: boolean } | null> {
+  if (!env.ETHERSCAN_API_KEY) return null;
+  const url = new URL(etherscanApiUrl());
+  url.searchParams.set("chainid", String(getNetwork(network).chain.id));
+  url.searchParams.set("module", "contract");
+  url.searchParams.set("action", "getsourcecode");
+  url.searchParams.set("address", contractAddress);
+  url.searchParams.set("apikey", env.ETHERSCAN_API_KEY);
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { status: string; result?: Array<{ SourceCode?: string; Proxy?: string }> | string };
+    const row = Array.isArray(body.result) ? body.result[0] : undefined;
+    if (body.status !== "1" || !row) return null;
+    return { verified: !!row.SourceCode && row.SourceCode.length > 0, proxy: row.Proxy === "1" };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A transaction and its receipt through the explorer's RPC proxy — for when
  * the RPC nodes in use don't keep transactions that old. Null without
  * `ETHERSCAN_API_KEY`, or when the explorer doesn't have it either.

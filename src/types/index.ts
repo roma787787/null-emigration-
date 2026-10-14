@@ -62,6 +62,8 @@ export interface MigrationTerms {
    * old price ÷ new price, an estimate only.
    */
   rate?: { newPerOld: number; source: "simulated" | "ratio" | "assumed" | "market"; checked?: boolean } | null;
+  /** Where to migrate from a wallet: the contract's Write Contract tab (verified source), the project's site. */
+  links?: { migrate: string | null; website: string | null } | null;
   /** New tokens already on the contract to hand out, or minted on exchange (the contract is the new token). */
   funding: { kind: "balance"; amount: string; empty: boolean; symbol: string | null } | { kind: "mint" } | null;
   /** USD per whole token from $300 test swaps, and buy-old/migrate/sell-new at the rate, in percent. */

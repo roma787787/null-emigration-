@@ -174,3 +174,16 @@ test("trial-exchange arguments are filled the way a holder would", () => {
   assert.equal(calls.length, 3);
   assert.ok(calls[0]!.startsWith(sel("swap(uint256)")));
 });
+
+test("the project site comes from the token's own DexScreener profile, on its chain", async () => {
+  const { siteFromPairs } = await import("./projectLinks.js");
+  const token = "0x831753dd7087cac61ab5644b308642cc1c33dc13";
+  const pairs = [
+    { chainId: "ethereum", baseToken: { address: token }, info: { websites: [{ label: "Website", url: "https://wrong-chain.example" }] } },
+    { chainId: "polygon", baseToken: { address: "0x0000000000000000000000000000000000000001" }, info: { websites: [{ url: "https://other.example" }] } },
+    { chainId: "polygon", baseToken: { address: token.toUpperCase().replace("0X", "0x") }, info: { websites: [{ label: "Docs", url: "https://docs.quick.example" }, { label: "Website", url: "https://quick.example" }, { label: "x", url: "javascript:alert(1)" }] } },
+  ];
+  assert.equal(siteFromPairs(pairs, "polygon", token), "https://quick.example");
+  assert.equal(siteFromPairs(pairs, "base", token), null);
+  assert.equal(siteFromPairs([{ chainId: "polygon", baseToken: { address: token }, info: { websites: [{ url: "http://insecure.example" }] } }], "polygon", token), null);
+});

@@ -101,6 +101,19 @@ function tradePair(terms: MigrationTerms | null | undefined): { pair: string; no
   return { pair: "1:1", note: rate === undefined && terms?.ratio ? "card.spreadCheckRatio" : null };
 }
 
+/** A URL inside a MarkdownV2 link: only ")" and "\\" need escaping there. */
+const mdUrl = (url: string) => url.replace(/[)\\]/g, (c) => `\\${c}`);
+
+/** "🚀 Migrate: on the contract (Write Contract) · project site" — or null with neither link. */
+export function migrateLine(lang: Language, terms: MigrationTerms | null | undefined): string | null {
+  const links = terms?.links;
+  const parts = [
+    links?.migrate ? `[${escapeMd(t(lang, "card.migrateContract"))}](${mdUrl(links.migrate)})` : null,
+    links?.website ? `[${escapeMd(t(lang, "card.projectSite"))}](${mdUrl(links.website)})` : null,
+  ].filter((p): p is string => p !== null);
+  return parts.length > 0 ? `🚀 ${escapeMd(t(lang, "card.migrateHere"))}: ${parts.join(" · ")}` : null;
+}
+
 /** The 🔁 line: the rate and where it comes from. */
 function rateLine(lang: Language, terms: MigrationTerms): string | null {
   const rate = terms.rate;
@@ -233,8 +246,6 @@ export function formatMigrationAlert(
     links.push(`[DexScreener Token B](${network.dexscreenerTokenUrl(migration.tokenBAddress)})`);
   }
 
-  const confidenceEmoji = migration.confidence === "HIGH" ? "🟢" : migration.confidence === "MEDIUM" ? "🟡" : "⚪️";
-
   const title = options.manual
     ? `🔎 *${escapeMd(t(lang, "card.titleManual"))}*`
     : options.update
@@ -259,6 +270,8 @@ export function formatMigrationAlert(
   if (migration.rwaSignals.length > 0) extras.push(`🏦 RWA: ${escapeMd(migration.rwaSignals.join(", "))}`);
   const terms = termsLines(lang, migration.terms);
   if (terms.length > 0) extras.push("", ...terms);
+  const migrate = migrateLine(lang, migration.terms);
+  if (migrate) extras.push(...(terms.length > 0 ? [] : [""]), migrate);
 
   return [
     title,
@@ -274,7 +287,6 @@ export function formatMigrationAlert(
     `🎯 ${escapeMd(t(lang, "card.targetToken"))}`,
     tokenBLine,
     "",
-    `📊 ${escapeMd(t(lang, "card.analysisStatus"))}: ${confidenceEmoji} *${migration.confidence} ${escapeMd(t(lang, "card.confidenceWord"))}* \\(${migration.confidenceScore}%\\)`,
     `⚡️ ${escapeMd(t(lang, "card.foundSignals"))}: ${signalsLine}`,
     ...extras,
     "",
@@ -323,6 +335,7 @@ export function formatMigrationOpened(migration: MigrationContractRecord, lang: 
     `📄 ${escapeMd(t(lang, "card.contract"))} ${escapeMd(migration.contractAddress)}`,
     `🧾 ${escapeMd(t(lang, "opened.firstTx"))}: ${tx}`,
     ...(terms.length > 0 ? ["", ...terms] : []),
+    ...(migrateLine(lang, migration.terms) ? [migrateLine(lang, migration.terms)!] : []),
     "",
     `🔗 ${escapeMd(t(lang, "card.links"))}`,
     links.join(" \\| "),

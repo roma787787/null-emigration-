@@ -6,6 +6,7 @@ import { quoteTokenFor } from "../config/marketAssets.js";
 import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
 import { inspectContract } from "./migrationAnalyzer.js";
+import { readProjectLinks } from "./projectLinks.js";
 import { interpretRatio, newPerOldFromRaw, simulateExchange, type SimulatedExchange } from "./migrationRate.js";
 
 /**
@@ -145,6 +146,8 @@ export async function readMigrationTerms(input: TermsInput): Promise<MigrationTe
         terms.funding = { kind: "balance", amount: formatAmount(balance, decimals), empty: balance === 0n, symbol };
       }
     }
+
+    terms.links = await readProjectLinks(input.network, at, input.tokenAAddress, input.tokenBAddress).catch(() => null);
 
     const market = await readMarket(input.network, input.tokenAAddress, input.tokenBAddress, input.tokenACheck);
     if (market) {

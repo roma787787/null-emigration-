@@ -28,6 +28,8 @@ export interface NetworkConfig {
   explorerAddressUrl: (address: string) => string;
   explorerTxUrl: (txHash: string) => string;
   dexscreenerTokenUrl: (address: string) => string;
+  /** DexScreener's chain id (its API's `chainId`). */
+  dexscreenerSlug: string;
 }
 
 interface NetworkSpec {
@@ -222,6 +224,7 @@ function toConfig(key: string, spec: NetworkSpec, custom: boolean): NetworkConfi
     explorerAddressUrl: (address) => `${explorer}/address/${address}`,
     explorerTxUrl: (txHash) => `${explorer}/tx/${txHash}`,
     dexscreenerTokenUrl: (address) => `https://dexscreener.com/${spec.dexscreenerSlug}/${address}`,
+    dexscreenerSlug: spec.dexscreenerSlug,
   };
 }
 

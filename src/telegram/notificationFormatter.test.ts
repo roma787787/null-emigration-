@@ -42,11 +42,11 @@ function migration(overrides: Partial<MigrationContractRecord> = {}): MigrationC
   };
 }
 
-test("includes the network label, confidence, and matched function", () => {
+test("includes the network label and matched function, but no analysis status line", () => {
   const text = formatMigrationAlert(token, migration(), "en");
 
   assert.match(text, /Arbitrum One/);
-  assert.match(text, /HIGH CONFIDENCE/);
+  assert.doesNotMatch(text, /CONFIDENCE|Analysis status/);
   assert.ok(text.includes("migrate\\(uint256\\)"));
 });
 
@@ -65,13 +65,13 @@ test("omits the DexScreener link and shows a placeholder when Token B is unknown
   );
 
   assert.doesNotMatch(text, /dexscreener\.com/);
-  assert.match(text, /MEDIUM CONFIDENCE/);
+  assert.match(text, /not set yet/);
 });
 
-test("includes the confidence percentage and names the matched getter (ru)", () => {
+test("names the matched getter, without a confidence percentage (ru)", () => {
   const text = formatMigrationAlert(token, migration(), "ru");
 
-  assert.match(text, /90%/);
+  assert.doesNotMatch(text, /90%/);
   assert.ok(text.includes("переменная newToken"));
 });
 
@@ -119,4 +119,19 @@ test("lists action functions first and caps the function list", () => {
   assert.ok(found.indexOf("migrateFromLEND") < found.indexOf("migrationEnded"));
   assert.ok(!found.includes("migrationStarted"));
   assert.ok(found.includes("\\+2 more"));
+});
+
+test("a migrate line links the contract's Write Contract tab and the project site, escaped for MarkdownV2", async () => {
+  const { migrateLine } = await import("./notificationFormatter.js");
+  const { markdownV2Problem } = await import("./markdownV2.js");
+  const terms = {
+    status: "open" as const, startsAt: null, endsAt: null, ratio: null, funding: null, prices: null,
+    links: { migrate: "https://etherscan.io/address/0xabc#writeContract", website: "https://quick.example/convert_(v2)" },
+  };
+  const line = migrateLine("ru", terms)!;
+  assert.equal(line, "🚀 Мигрировать: [через контракт \\(Write Contract\\)](https://etherscan.io/address/0xabc#writeContract) · [сайт проекта](https://quick.example/convert_(v2\\))");
+  assert.equal(markdownV2Problem(line), null);
+  assert.match(migrateLine("en", { ...terms, links: { migrate: null, website: "https://x.example" } })!, /^🚀 Migrate: \[project site\]\(https:\/\/x\.example\)$/);
+  assert.equal(migrateLine("en", { ...terms, links: { migrate: null, website: null } }), null);
+  assert.equal(migrateLine("en", { ...terms, links: undefined }), null);
 });

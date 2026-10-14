@@ -17,6 +17,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
+process.env.DEXSCREENER_API_URL = "off"; // no outside calls: project sites come from a stub in e2e/bot.ts
 process.env.DATABASE_URL ??= "postgres://tracker:tracker@localhost:5432/migration_tracker";
 process.env.REDIS_URL ??= "redis://localhost:6379";
 // The local chain is declared exactly the way an operator adds a new network

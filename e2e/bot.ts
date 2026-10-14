@@ -26,6 +26,7 @@ process.env.SIGNATURE_DB_URL = "off";
 // A fake Etherscan (below) answers getcontractcreation for /analyze <address>.
 process.env.ETHERSCAN_API_KEY = "test";
 process.env.ETHERSCAN_API_URL = "http://127.0.0.1:8549/v2/api";
+process.env.DEXSCREENER_API_URL = "http://127.0.0.1:8549/dex";
 process.env.RECHECK_DELAYS_SEC = "3,6,9,12";
 
 const ADMIN = 1001; // admin, English
@@ -158,6 +159,8 @@ async function write(from: typeof owner, address: Address, name: string, functio
 
 // Fake Etherscan: getcontractcreation for the contracts registered here, empty otherwise.
 const creations = new Map<string, { creator: string; txHash: string }>();
+// Contracts whose source the fake explorer has verified (a Write Contract tab to migrate from).
+const verifiedContracts = new Set<string>();
 // Transactions only the explorer has (an RPC with a short transaction index).
 const explorerTxs = new Map<string, { tx: unknown; receipt: unknown }>();
 const etherscanApi = createServer((req, res) => {
@@ -167,6 +170,19 @@ const etherscanApi = createServer((req, res) => {
     const result = !known ? null : url.searchParams.get("action") === "eth_getTransactionByHash" ? known.tx : known.receipt;
     res.setHeader("content-type", "application/json");
     return void res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result }));
+  }
+  if (url.pathname.startsWith("/dex/latest/dex/tokens/")) {
+    // DexScreener: the old test token's profile names its site.
+    const asked = url.pathname.split("/").pop()!.toLowerCase().split(",");
+    const pairs = asked.filter((a) => a === oldToken.address.toLowerCase())
+      .map((a) => ({ chainId: "anvil", baseToken: { address: a }, info: { websites: [{ label: "Website", url: "https://old-token.example/migrate" }] } }));
+    res.setHeader("content-type", "application/json");
+    return void res.end(JSON.stringify({ pairs }));
+  }
+  if (url.searchParams.get("action") === "getsourcecode") {
+    const verified = verifiedContracts.has((url.searchParams.get("address") ?? "").toLowerCase());
+    res.setHeader("content-type", "application/json");
+    return void res.end(JSON.stringify({ status: "1", message: "OK", result: [{ SourceCode: verified ? "contract M {}" : "", Proxy: "0" }] }));
   }
   const row = creations.get((url.searchParams.get("contractaddresses") ?? "").toLowerCase());
   res.setHeader("content-type", "application/json");
@@ -401,8 +417,9 @@ r = await send(ALICE, `/analyze anvil 0x${"ab".repeat(32)}`);
 check("/analyze with an unknown hash says it wasn't found", has(textsTo(r, ALICE), /не знайдено|not found/i), textsTo(r, ALICE));
 r = await send(ALICE, `/analyze anvil ${analyzed.hash}`);
 check(
-  "/analyze on a real deploy returns a HIGH card with Token B (valid MarkdownV2)",
-  has(textsTo(r, ALICE), new RegExp(`АНАЛІЗ КОНТРАКТУ[\\s\\S]*${newToken.address}[\\s\\S]*HIGH`, "i")),
+  "/analyze on a real deploy returns a card with Token B and its signals, without an analysis status line",
+  has(textsTo(r, ALICE), new RegExp(`АНАЛІЗ КОНТРАКТУ[\\s\\S]*${newToken.address}[\\s\\S]*Знайдено`, "i")) &&
+    !has(textsTo(r, ALICE), /Статус аналізу|CONFIDENCE/),
   textsTo(r, ALICE),
 );
 const strangerWallet = wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
@@ -420,7 +437,14 @@ check(
   textsTo(r, ALICE),
 );
 creations.set(byStranger.address.toLowerCase(), { creator: strangerWallet.account.address, txHash: byStranger.hash });
+verifiedContracts.add(byStranger.address.toLowerCase());
 r = await send(ALICE, `/analyze anvil ${byStranger.address}`);
+check(
+  "/analyze links where to migrate: the verified contract's Write Contract tab and the project site from DexScreener",
+  textsTo(r, ALICE).some((m) => m.includes(`🚀 Мігрувати: [через контракт \\(Write Contract\\)](`) && m.includes(`${byStranger.address}#writeContract)`) &&
+    m.includes("[сайт проєкту](https://old-token.example/migrate)")),
+  textsTo(r, ALICE),
+);
 check(
   "/analyze <contract address> finds the deploy transaction itself (explorer API) and analyzes it",
   has(textsTo(r, ALICE), new RegExp(`${byStranger.hash}`)) && has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}`, "i")) &&

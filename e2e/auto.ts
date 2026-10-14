@@ -12,6 +12,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { markdownV2Problem } from "./markdownV2.js";
 
+process.env.DEXSCREENER_API_URL = "off"; // no outside calls: project sites come from a stub in e2e/bot.ts
 process.env.DATABASE_URL ??= "postgres://tracker:tracker@localhost:5432/migration_tracker";
 process.env.REDIS_URL ??= "redis://localhost:6379";
 const NETWORK = "anvil";
