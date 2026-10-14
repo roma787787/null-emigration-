@@ -531,7 +531,11 @@ const high = await deploy(owner, "MigratorWithGetters", [oldToken.address, newTo
 let sent = await alertsFor(high.address, 20_000);
 check("HIGH migrator: alert reaches the admin and Alice, not Bob (rejected), Carol (network off) or Dan", recipients(sent).join() === `${ADMIN},${ALICE}`, recipients(sent));
 check("…Alice's card is in Ukrainian, the admin's in English", has(textsTo(sent, ALICE), /ВИЯВЛЕНО КОНТРАКТ МІГРАЦІЇ/) && has(textsTo(sent, ADMIN), /MIGRATION CONTRACT DETECTED/), sent.map((c) => c.body.text));
-check("…card has Token A, Token B, confidence and links", has(textsTo(sent, ADMIN), new RegExp(`OLD[\\s\\S]*${newToken.address}[\\s\\S]*HIGH CONFIDENCE[\\s\\S]*DexScreener`)), textsTo(sent, ADMIN));
+check(
+  "…card has Token A, Token B, its signals and links — and no analysis status line",
+  has(textsTo(sent, ADMIN), new RegExp(`OLD[\\s\\S]*${newToken.address}[\\s\\S]*⚡️ Found[\\s\\S]*DexScreener`)) && !has(textsTo(sent, ADMIN), /CONFIDENCE|Analysis status/),
+  textsTo(sent, ADMIN),
+);
 const latency = sent.length ? (Math.min(...sent.map((c) => c.at)) - t0) / 1000 : NaN;
 check(`…delivered ${latency.toFixed(1)}s after the deploy tx was sent (target 5-10s)`, latency <= 10, latency);
 
