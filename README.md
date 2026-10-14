@@ -240,7 +240,7 @@ find migrations. For every block on every enabled network:
    fleets), alerts once per `AUTO_DEDUP_HOURS` (default 24) — only alerts count: a clone dropped for having no market doesn't block a later one whose token trades.
 6. **Alert** to every approved chat that has auto alerts on and whose level
    the token passes. The card shows the source (auto-discovery), Token A's
-   full address, and the test swaps (`$1,000 → 0.80% ✅ · $300 → 0.20% ✅`).
+   full address, and how big a position the old token's market takes (`💧 Old token market: up to $1,000 without heavy slippage` — the largest OKX test swap within its cap).
    It also shows the **migration terms**, read from the contract where it
    exposes them: status (open / opens `<date>` / paused / ended, from
    `startTime()`, `paused()`, `isActive()`-style getters), the deadline
@@ -272,9 +272,12 @@ find migrations. For every block on every enabled network:
      `LEND_AAVE_RATIO()`…), read as × r, ÷ r, 1e18-scaled or basis points —
      whichever old price ÷ new price agrees with (within 2.5×); with no
      prices to check, × r (or r / 1e18 when that large), marked unchecked;
-   - **prices alone**: no rate in the contract — 1:1 when prices sit within
-     2× of it, marked **not confirmed** on the card and the trade line;
-     otherwise only an estimate ("by prices ≈ 1:1,151 — check the
+   - **a real exchange**: once the first one goes through the contract
+     (the "migration opened" watch finds it), its Transfer logs — old tokens
+     in, new tokens out — give the rate, for contracts no trial exchange
+     gets through (wallets only, whitelists);
+   - **prices alone**: never taken for a rate, not even when they sit near
+     1:1 (PHAR → p33 looked like 1:1 +56% and was 1:0.64) — only an estimate ("by prices ≈ 1:1,151 — check the
      announcement"), and no trade is computed from it.
 
    With none of these the card says the rate is unknown. A migrator whose
@@ -295,7 +298,9 @@ find migrations. For every block on every enabled network:
 
    The card shows it as `🔁 Rate (old:new): 1:750 — checked by a trial
    exchange on the contract`, and the spread and the trade use it
-   (`migrate 1:750 → sell new`).
+   (`migrate 1:750 → sell new`). Without a real rate there is no trade line:
+   the card says the rate comes with the first exchange, and the profit
+   watch picks it up from there.
    **Is it the old token's team's?** A `👥` line compares the migration
    contract's deployer and `owner()` with the old token's deployer and
    `owner()` (explorer API, else the deploy found on-chain): ✅ when they

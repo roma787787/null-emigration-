@@ -63,6 +63,7 @@ export async function pollProfits(
       const terms = await termsFor(network, record.contractAddress, record.tokenAAddress, record.tokenBAddress, undefined, {
         creator: record.creatorAddress,
         keep: record.terms,
+        observedTx: record.openedTx ?? null,
       });
       if (!terms) continue;
       await migrationContractRepository.setTerms(record.id, terms);

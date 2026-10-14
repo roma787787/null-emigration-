@@ -118,7 +118,7 @@ export async function pollOpenings(
         break;
       }
       if (found) {
-        const terms = await termsFor(network, record.contractAddress, record.tokenAAddress, record.tokenBAddress, undefined, { creator: record.creatorAddress, keep: record.terms });
+        const terms = await termsFor(network, record.contractAddress, record.tokenAAddress, record.tokenBAddress, undefined, { creator: record.creatorAddress, keep: record.terms, observedTx: found.txHash });
         if (await migrationContractRepository.markOpened(record.id, found.txHash, found.blockNumber, terms)) {
           logger.info({ network, contract: record.contractAddress, tx: found.txHash }, "Migration opened");
           await onOpened({ ...record, terms: terms ?? record.terms, openedAt: new Date(), openedTx: found.txHash });

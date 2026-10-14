@@ -53,23 +53,27 @@ function foundSignals(lang: Language, migration: MigrationContractRecord): strin
   return signals;
 }
 
-function formatImpact(check: StoredLiquidityCheck): string {
-  const mark = check.status === "pass" ? "✅" : check.status === "skip" ? "❌" : "❔";
-  const impact = check.impactPercent !== null ? `${check.impactPercent.toFixed(2)}%` : check.reason;
-  return `$${check.amountUsd.toLocaleString("en-US")} → ${impact} ${mark}`;
-}
-
-/** "💧 Liquidity (OKX): $10,000 → 2.10% ✅ · $1,000 → 0.80% ✅ · $300 → 0.20% ✅" — the executable-route tests on Token A. */
+/**
+ * "💧 Old token market: up to $1,000 without heavy slippage" — the largest
+ * OKX test swap on Token A that stayed within its level's impact cap: how big
+ * a position the old token takes. The per-level numbers stay behind the
+ * filters (/settings), not on the card.
+ */
 function liquidityLine(lang: Language, migration: MigrationContractRecord): string | null {
   const checks = migration.liquidity;
   if (!checks) return null;
   // Largest swap first; detections stored before a level existed just lack it.
   const present = (["DEEP", "STRICT", "LOW_CAP"] as const).flatMap((level) => (checks[level] ? [checks[level]] : []));
+  if (present.length === 0) return null;
   const label = escapeMd(t(lang, "card.liquidity"));
   if (present.every((c) => c.status === "unchecked")) {
     return `💧 ${label}: _${escapeMd(t(lang, "card.liquidityUnchecked", { reason: present[0]?.reason ?? "" }))}_`;
   }
-  return `💧 ${label}: ${escapeMd(present.map(formatImpact).join(" · "))}`;
+  const amount = (c: StoredLiquidityCheck) => `$${c.amountUsd.toLocaleString("en-US")}`;
+  const best = present.find((c) => c.status === "pass");
+  const smallest = present.at(-1)!;
+  const text = best ? t(lang, "card.liquidityUpTo", { amount: amount(best) }) : t(lang, "card.liquidityThin", { amount: amount(smallest) });
+  return `💧 ${label}: ${escapeMd(text)}`;
 }
 
 /** "24.09.2026 14:00 UTC" */
@@ -131,6 +135,7 @@ function rateLine(lang: Language, terms: MigrationTerms): string | null {
     const pair = formatRatePair(rate.newPerOld);
     text =
       rate.source === "simulated" ? t(lang, "card.rateSimulated", { pair })
+      : rate.source === "observed" ? t(lang, "card.rateObserved", { pair })
       : rate.source === "ratio" ? t(lang, rate.checked ? "card.rateChecked" : "card.rateUnchecked", { pair, getter, value })
       : rate.source === "assumed" ? t(lang, "card.rateAssumed")
       : t(lang, terms.ratio ? "card.rateMarketRaw" : "card.rateMarket", { pair, getter, value });

@@ -733,6 +733,36 @@ console.log("\n=== migration terms & opening ===");
   );
   console.log("\n=== SAMPLE QUICK-STYLE TERMS (ru) ===\n" + quickCard);
 
+  // Never 1:1 by assumption: a wallets-only 1:1000 migrator has no readable rate until a real exchange.
+  const oldE = await token("Wallet Old", "WOLD");
+  const newE = await token("Wallet New", "WNEW");
+  markets.set(lower(oldE), { low: 0.3, strict: 0.6, price: 1 });
+  markets.set(lower(newE), { low: 1, strict: 2, price: 0.00105 });
+  const walletsOnly = await deploy(owner, "EoaOnlyMigrator", [oldE, newE]);
+  const beforeTerms = await termsFor(NETWORK, walletsOnly, oldE, newE);
+  check(
+    "rate: no trial exchange and no rate getter → only a price estimate, no trade computed at an assumed 1:1",
+    beforeTerms?.rate?.source === "market" && beforeTerms.prices?.roundTrip === undefined &&
+      /настоящий курс придёт с первым обменом/.test(termsLines("ru", beforeTerms).join("\n")) && !/мигрировать 1:1/.test(termsLines("ru", beforeTerms).join("\n")),
+    beforeTerms,
+  );
+  await chain.waitForTransactionReceipt({
+    hash: await owner.writeContract({ address: newE, abi: tokenAbi, functionName: "transfer", args: [walletsOnly, 10n ** 23n] } as never),
+  });
+  await chain.waitForTransactionReceipt({
+    hash: await owner.writeContract({ address: oldE, abi: tokenAbi, functionName: "approve", args: [walletsOnly, 10n ** 18n] } as never),
+  });
+  const realTx = await owner.writeContract({ address: walletsOnly, abi: artifacts.EoaOnlyMigrator!.abi, functionName: "migrate", args: [10n ** 18n] } as never);
+  await chain.waitForTransactionReceipt({ hash: realTx });
+  const afterTerms = await termsFor(NETWORK, walletsOnly, oldE, newE, undefined, { observedTx: realTx });
+  check(
+    `rate: after the first real exchange the rate is read from it → 1:1000, $300 → $${afterTerms?.prices?.roundTrip?.outUsd}`,
+    afterTerms?.rate?.source === "observed" && afterTerms.rate.newPerOld === 1000 &&
+      Math.abs((afterTerms.prices?.roundTrip?.outUsd ?? 0) - 311.85) < 0.05 &&
+      /1:1,000 — по реальному обмену через контракт/.test(termsLines("ru", afterTerms).join("\n")),
+    afterTerms,
+  );
+
   // "The trade turned profitable": the pending migrator's new token (−7.8% at alert time) gets a deep market.
   const { pollProfits } = await import("../src/chain/profitWatcher.js");
   const { clearLiquidityCache } = await import("../src/liquidity/okxLiquidity.js");

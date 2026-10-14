@@ -8,7 +8,7 @@ import { logger } from "../utils/logger.js";
 import { inspectContract } from "./migrationAnalyzer.js";
 import { readProjectLinks } from "./projectLinks.js";
 import { readTeamLink } from "./teamCheck.js";
-import { interpretRatio, newPerOldFromRaw, simulateExchange, type SimulatedExchange } from "./migrationRate.js";
+import { interpretRatio, newPerOldFromRaw, observedExchange, simulateExchange, type SimulatedExchange } from "./migrationRate.js";
 
 /**
  * The terms a trader needs to act on a migration, read from the contract
@@ -103,6 +103,8 @@ export interface TermsInput {
   creatorAddress?: Address | null;
   /** Terms read before: their links and team check are kept rather than looked up again (re-reads for prices). */
   keep?: MigrationTerms | null;
+  /** A real exchange through the contract (the first one seen): its rate, when the trial exchange can't be made. */
+  observedTx?: Hex | null;
   now?: number;
 }
 
@@ -175,12 +177,17 @@ export async function readMigrationTerms(input: TermsInput): Promise<MigrationTe
               fundContract: terms.funding?.kind === "balance",
             }).catch(() => null)
           : null;
-      terms.rate = resolveRate(simulated, terms.ratio, decA, decB, prices);
+      const observed =
+        !simulated && input.observedTx && input.tokenAAddress && input.tokenBAddress
+          ? await observedExchange(client, input.observedTx, at, input.tokenAAddress, input.tokenBAddress)
+          : null;
+      terms.rate = resolveRate(simulated ?? observed, terms.ratio, decA, decB, prices, observed && !simulated ? "observed" : "simulated");
+      const exchange = simulated ?? observed;
       const usable = terms.rate && terms.rate.source !== "market" ? terms.rate : null;
       prices.spreadPercent = usable ? spreadPercent(prices.oldUsd, prices.newUsd, usable.newPerOld) : null;
       const roundTrip =
         usable && input.tokenBAddress && prices.newUsd !== null
-          ? await readRoundTrip(input.network, input.tokenBAddress, checkA, decA, decB, usable.newPerOld, simulated)
+          ? await readRoundTrip(input.network, input.tokenBAddress, checkA, decA, decB, usable.newPerOld, exchange)
           : null;
       terms.prices = roundTrip ? { ...prices, roundTrip } : prices;
     }
@@ -200,32 +207,28 @@ export function priceFromQuote(quote: PriceQuote | null, decimals: number | null
 /** Impact above this on the small price quote marks the market thin. */
 const THIN_IMPACT_PERCENT = 5;
 
-/** No rate in the contract, but prices this close to 1:1 (within 2×) are taken as 1:1. */
-const ONE_TO_ONE_BAND = 2;
-
 /**
- * The rate a trader can act on: the simulated exchange; else the ratio
- * getter read the way prices agree with; else, with no rate the contract
- * gives up, 1:1 when prices sit near it — or the market's own ratio, an
- * estimate the trade is not computed from.
+ * The rate a trader can act on — never assumed: the trial exchange (or a real
+ * one through the contract); else the ratio getter read the way prices agree
+ * with. With neither, only the market's own ratio as an estimate, which the
+ * trade is not computed from: the real rate comes with the first exchange.
  */
 export function resolveRate(
-  simulated: SimulatedExchange | null,
+  exchange: SimulatedExchange | null,
   ratio: MigrationTerms["ratio"],
   decA: number | null,
   decB: number | null,
   prices: { oldUsd: number | null; newUsd: number | null } | null,
+  exchangeSource: "simulated" | "observed" = "simulated",
 ): MigrationTerms["rate"] {
   if (decA === null || decB === null) return null;
-  if (simulated) return { newPerOld: newPerOldFromRaw(simulated.received, simulated.spent, decA, decB), source: "simulated" };
+  if (exchange) return { newPerOld: newPerOldFromRaw(exchange.received, exchange.spent, decA, decB), source: exchangeSource };
   const market = prices?.oldUsd && prices.newUsd ? prices.oldUsd / prices.newUsd : null;
   if (ratio) {
     const read = interpretRatio(BigInt(ratio.value), decA, decB, market);
     if (read) return { newPerOld: read.newPerOld, source: "ratio", checked: read.checked };
-    return market ? { newPerOld: market, source: "market" } : null;
   }
-  if (!market) return null;
-  return market <= ONE_TO_ONE_BAND && market >= 1 / ONE_TO_ONE_BAND ? { newPerOld: 1, source: "assumed" } : { newPerOld: market, source: "market" };
+  return market ? { newPerOld: market, source: "market" } : null;
 }
 
 /**
@@ -309,7 +312,7 @@ export async function termsFor(
   tokenAAddress: Address | null,
   tokenBAddress: Address | null,
   tokenACheck?: LiquidityCheck,
-  options: { creator?: Address | null; keep?: MigrationTerms | null } = {},
+  options: { creator?: Address | null; keep?: MigrationTerms | null; observedTx?: Hex | null } = {},
 ): Promise<MigrationTerms | null> {
   try {
     const { selectors, signatures } = await inspectContract(network, contractAddress);
@@ -317,6 +320,7 @@ export async function termsFor(
       network, contractAddress, tokenAAddress, tokenBAddress, selectors, signatures, tokenACheck,
       creatorAddress: options.creator ?? null,
       keep: options.keep ?? null,
+      observedTx: options.observedTx ?? null,
     });
   } catch (err) {
     logger.warn({ err, network, contractAddress }, "Migration terms unavailable");

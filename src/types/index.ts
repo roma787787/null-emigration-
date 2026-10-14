@@ -56,12 +56,14 @@ export interface MigrationTerms {
   ratio: { getter: string; value: string } | null;
   /**
    * New tokens per old token (whole tokens). simulated: an exchange made in
-   * an eth_call — exact; ratio: the ratio getter, read the way the market
-   * agrees with (checked) or plainly (unchecked); assumed: no rate in the
-   * contract, prices sit near 1:1; market: no rate the contract gives up —
-   * old price ÷ new price, an estimate only.
+   * an eth_call — exact; observed: a real exchange through the contract (the
+   * first one seen) — exact; ratio: the ratio getter, read the way the market
+   * agrees with (checked) or plainly (unchecked); market: no rate the
+   * contract gives up — old price ÷ new price, an estimate the trade is never
+   * computed from. (assumed: 1:1 from prices — only in terms stored before
+   * that was dropped.)
    */
-  rate?: { newPerOld: number; source: "simulated" | "ratio" | "assumed" | "market"; checked?: boolean } | null;
+  rate?: { newPerOld: number; source: "simulated" | "observed" | "ratio" | "assumed" | "market"; checked?: boolean } | null;
   /**
    * Whether the contract is the old token's team's: its deployer is the old
    * token's deployer, or its deployer/owner is the old token's deployer/owner.

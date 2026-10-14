@@ -81,7 +81,7 @@ test("terms lines are valid MarkdownV2 in every shape", () => {
   assert.doesNotMatch(quick, /сверьте/);
   assert.match(termsLines("en", shapes[11]!).join("\n"), /1:1,000 — checked by a trial exchange on the contract/);
   assert.match(termsLines("en", shapes[11]!).join("\n"), /spread −13\\\.1% at 1:1,000/);
-  assert.match(termsLines("en", shapes[12]!).join("\n"), /not stated in the contract; by prices ≈ 1:1,151/);
+  assert.match(termsLines("en", shapes[12]!).join("\n"), /not readable from the contract yet; by prices ≈ 1:1,151 — the real rate comes with the first exchange/);
   assert.match(termsLines("en", shapes[13]!).join("\n"), /rate\\\(\\\) \\= 3 doesn't match prices/);
   assert.match(termsLines("en", shapes[14]!).join("\n"), /1:750 — from rate\\\(\\\) \\= 750, read as a multiplier/);
   assert.match(termsLines("ru", shapes[15]!).join("\n"), /1:1 НЕ подтверждён — в контракте курса нет, пробный обмен не прошёл/);
@@ -127,7 +127,10 @@ test("the rate: simulated first, then the ratio getter, then prices", () => {
   assert.deepEqual(resolveRate(null, ratio, 18, 18, prices), { newPerOld: 750, source: "ratio", checked: true });
   assert.equal(resolveRate(null, null, 18, 18, prices)!.source, "market");
   assert.ok(Math.abs(resolveRate(null, null, 18, 18, prices)!.newPerOld - 1151.3) < 0.1);
-  assert.deepEqual(resolveRate(null, null, 18, 18, { oldUsd: 0.0019, newUsd: 0.0027 }), { newPerOld: 1, source: "assumed" });
+  // Prices near 1:1 are not taken for 1:1 any more (PHAR → p33 was 1:0.64): only an estimate, no trade.
+  assert.deepEqual(resolveRate(null, null, 18, 18, { oldUsd: 0.1042, newUsd: 0.1622 })?.source, "market");
+  // A real exchange through the contract gives the rate when the trial one can't be made.
+  assert.deepEqual(resolveRate({ received: 640n, spent: 1000n }, null, 18, 18, null, "observed"), { newPerOld: 0.64, source: "observed" });
   assert.equal(resolveRate(null, null, 18, 18, { oldUsd: 1.5, newUsd: null }), null);
   assert.equal(newPerOldFromRaw(750_000_000n, 10n ** 18n, 18, 6), 750);
 });
@@ -186,4 +189,23 @@ test("the project site comes from the token's own DexScreener profile, on its ch
   assert.equal(siteFromPairs(pairs, "polygon", token), "https://quick.example");
   assert.equal(siteFromPairs(pairs, "base", token), null);
   assert.equal(siteFromPairs([{ chainId: "polygon", baseToken: { address: token }, info: { websites: [{ url: "http://insecure.example" }] } }], "polygon", token), null);
+});
+
+test("a real exchange's rate is read from its Transfer logs: old in (or burned), new out (or minted)", async () => {
+  const { exchangeFromLogs } = await import("./migrationRate.js");
+  const pad = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, "0")}`;
+  const T = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const word = (v: bigint) => `0x${v.toString(16).padStart(64, "0")}`;
+  const contract = "0x00000000000000000000000000000000000000cc";
+  const user = "0x00000000000000000000000000000000000000aa";
+  const oldT = "0x00000000000000000000000000000000000000a1";
+  const newT = "0x00000000000000000000000000000000000000b1";
+  const zero = "0x0000000000000000000000000000000000000000";
+  const logs = [
+    { address: oldT, topics: [T, pad(user), pad(contract)], data: word(10n ** 18n) },
+    { address: newT, topics: [T, pad(zero), pad(user)], data: word(1000n * 10n ** 18n) },
+    { address: "0x00000000000000000000000000000000000000ee", topics: [T, pad(user), pad(contract)], data: word(5n) },
+  ];
+  assert.deepEqual(exchangeFromLogs(logs, contract, oldT, newT), { received: 1000n * 10n ** 18n, spent: 10n ** 18n });
+  assert.equal(exchangeFromLogs(logs.slice(0, 1), contract, oldT, newT), null);
 });

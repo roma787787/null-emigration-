@@ -225,3 +225,49 @@ export function interpretRatio(
   }
   return { newPerOld: value >= 10n ** 15n ? Number(value) / 1e18 : Number(value), checked: false };
 }
+
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const DEAD = ["0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dead"];
+const topicAddress = (topic: string | undefined) => (topic ? `0x${topic.slice(26)}`.toLowerCase() : "");
+
+/**
+ * What a real exchange through the contract moved, from its Transfer logs:
+ * old tokens sent into the contract (or burned), new tokens sent out of it
+ * (or minted). Null when the transaction moved neither.
+ */
+export function exchangeFromLogs(
+  logs: Array<{ address: string; topics: readonly string[]; data: string }>,
+  contract: Address,
+  tokenA: Address,
+  tokenB: Address,
+): SimulatedExchange | null {
+  const c = contract.toLowerCase();
+  let spent = 0n;
+  let received = 0n;
+  for (const log of logs) {
+    if (log.topics[0] !== TRANSFER_TOPIC || log.topics.length < 3 || log.data.length < 66) continue;
+    const from = topicAddress(log.topics[1]);
+    const to = topicAddress(log.topics[2]);
+    const value = BigInt(log.data.slice(0, 66));
+    const token = log.address.toLowerCase();
+    if (token === tokenA.toLowerCase() && (to === c || DEAD.includes(to)) && from !== c) spent += value;
+    if (token === tokenB.toLowerCase() && (from === c || DEAD.includes(from)) && to !== c && !DEAD.includes(to)) received += value;
+  }
+  return spent > 0n && received > 0n ? { received, spent } : null;
+}
+
+/** The rate of a real exchange through the contract (the first one the "opened" watch saw). */
+export async function observedExchange(
+  client: PublicClient,
+  txHash: Hex,
+  contract: Address,
+  tokenA: Address,
+  tokenB: Address,
+): Promise<SimulatedExchange | null> {
+  try {
+    const receipt = await client.getTransactionReceipt({ hash: txHash });
+    return receipt.status === "success" ? exchangeFromLogs(receipt.logs, contract, tokenA, tokenB) : null;
+  } catch {
+    return null;
+  }
+}

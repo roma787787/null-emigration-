@@ -589,3 +589,19 @@ contract YearnStyleStrategy {
         SimpleToken(want).transfer(newStrategy, SimpleToken(want).balanceOf(address(this)));
     }
 }
+
+/// 1:1000 with the rate only in the code, and exchanges only from wallets
+/// (tx.origin == msg.sender): no trial exchange gets through, so the rate is
+/// unknown until someone really migrates — then it is read from that exchange.
+contract EoaOnlyMigrator {
+    address public oldToken;
+    address public newToken;
+    event Migrated(address indexed user, uint256 amount);
+    constructor(address a, address b) { oldToken = a; newToken = b; }
+    function migrate(uint256 amount) external {
+        require(msg.sender == tx.origin, "wallets only");
+        SimpleToken(oldToken).transferFrom(msg.sender, address(this), amount);
+        SimpleToken(newToken).transfer(msg.sender, amount * 1000);
+        emit Migrated(msg.sender, amount);
+    }
+}
