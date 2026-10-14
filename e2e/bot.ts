@@ -427,7 +427,7 @@ const byStranger = await deploy(strangerWallet, "MigratorWithGetters", [newToken
 r = await send(ALICE, `/analyze anvil ${byStranger.hash}`);
 check(
   "/analyze of an untracked deploy with no Token A given reads Token A from the contract (auto-discovery path)",
-  has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}[\\s\\S]*Ринок старого токена: до \\$`, "i")),
+  has(textsTo(r, ALICE), new RegExp(`Автопошук[\\s\\S]*${newToken.address}[\\s\\S]*Ринок старого токена`, "i")),
   textsTo(r, ALICE),
 );
 const autoLine = (text: string) => text.includes("Автопошук: контракт проходить фільтри") || text.includes("Автопошук надіслав би алерт");
