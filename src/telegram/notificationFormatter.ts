@@ -172,6 +172,11 @@ export function termsLines(lang: Language, terms: MigrationTerms | null | undefi
       ? terms.startsAt !== null ? t(lang, "card.statusNotStartedAt", { date: formatUtc(terms.startsAt) }) : t(lang, "card.statusNotStarted")
       : t(lang, "card.statusUnknown");
   lines.push(`⏳ ${escapeMd(t(lang, "card.statusLabel"))}: ${escapeMd(status)}`);
+  const team = terms.team;
+  if (team && team.verdict !== "unknown") {
+    const text = team.verdict === "no" ? t(lang, "card.teamNo") : t(lang, team.via === "deployer" ? "card.teamDeployer" : "card.teamOwner");
+    lines.push(`👥 ${escapeMd(t(lang, "card.team"))}: ${escapeMd(text)}`);
+  }
   if (terms.endsAt !== null) lines.push(`📅 ${escapeMd(t(lang, "card.deadline"))}: ${escapeMd(formatUtc(terms.endsAt))}`);
   const rate = rateLine(lang, terms);
   if (rate) lines.push(rate);
@@ -289,6 +294,46 @@ export function formatMigrationAlert(
     "",
     `⚡️ ${escapeMd(t(lang, "card.foundSignals"))}: ${signalsLine}`,
     ...extras,
+    "",
+    `🔗 ${escapeMd(t(lang, "card.links"))}`,
+    links.join(" \\| "),
+  ].join("\n");
+}
+
+/** "3 d / 5 h / 20 min after the first alert". */
+function sinceFirstAlert(lang: Language, detectedAt: Date, now: Date): string {
+  const minutes = Math.max(0, Math.round((now.getTime() - detectedAt.getTime()) / 60_000));
+  const hours = Math.round(minutes / 60);
+  return hours >= 48 ? t(lang, "opened.after", { days: String(Math.round(hours / 24)) })
+    : minutes >= 60 ? t(lang, "opened.afterHours", { hours: String(hours) })
+    : t(lang, "opened.afterMinutes", { minutes: String(minutes) });
+}
+
+/**
+ * "The trade turned profitable": a watched migration re-priced on OKX now
+ * pays — the trade line leads, then the terms, where to migrate and links.
+ */
+export function formatProfitAlert(migration: MigrationContractRecord, lang: Language, now = new Date()): string {
+  const network = getNetwork(migration.network);
+  const tokenA = migration.tokenAAddress
+    ? `${escapeMd(migration.tokenASymbol ?? "UNKNOWN")} · ${escapeMd(migration.tokenAAddress)}`
+    : `_${escapeMd(t(lang, "card.tokenAUnknown"))}_`;
+  const links = [`[Block Explorer Contract](${network.explorerAddressUrl(migration.contractAddress)})`];
+  if (migration.tokenAAddress) links.push(`[DexScreener Token A](${network.dexscreenerTokenUrl(migration.tokenAAddress)})`);
+  if (migration.tokenBAddress) links.push(`[DexScreener Token B](${network.dexscreenerTokenUrl(migration.tokenBAddress)})`);
+  const terms = termsLines(lang, migration.terms);
+  const migrate = migrateLine(lang, migration.terms);
+  return [
+    `💰 *${escapeMd(t(lang, "profit.title"))}* 💰`,
+    `_${escapeMd(t(lang, "profit.note"))}_`,
+    "",
+    `📍 ${escapeMd(t(lang, "card.network"))}: ${escapeMd(network.label)}`,
+    `🪙 ${escapeMd(t(lang, "card.tokenA"))}: ${tokenA}`,
+    `🎯 ${escapeMd(t(lang, "card.targetToken"))} ${escapeMd(migration.tokenBAddress ?? "")}`,
+    `📄 ${escapeMd(t(lang, "card.contract"))} ${escapeMd(migration.contractAddress)}`,
+    `🕒 ${escapeMd(sinceFirstAlert(lang, migration.detectedAt, now))}`,
+    ...(terms.length > 0 ? ["", ...terms] : []),
+    ...(migrate ? [migrate] : []),
     "",
     `🔗 ${escapeMd(t(lang, "card.links"))}`,
     links.join(" \\| "),

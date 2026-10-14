@@ -7,6 +7,7 @@ import { readTokenSymbol } from "../chain/tokenMetadata.js";
 import { logger } from "../utils/logger.js";
 import { inspectContract } from "./migrationAnalyzer.js";
 import { readProjectLinks } from "./projectLinks.js";
+import { readTeamLink } from "./teamCheck.js";
 import { interpretRatio, newPerOldFromRaw, simulateExchange, type SimulatedExchange } from "./migrationRate.js";
 
 /**
@@ -98,6 +99,10 @@ export interface TermsInput {
   signatures?: Map<string, string>;
   /** Token A's $300 test swap, if already made. */
   tokenACheck?: LiquidityCheck;
+  /** Who deployed the contract, when known (else looked up). */
+  creatorAddress?: Address | null;
+  /** Terms read before: their links and team check are kept rather than looked up again (re-reads for prices). */
+  keep?: MigrationTerms | null;
   now?: number;
 }
 
@@ -147,7 +152,11 @@ export async function readMigrationTerms(input: TermsInput): Promise<MigrationTe
       }
     }
 
-    terms.links = await readProjectLinks(input.network, at, input.tokenAAddress, input.tokenBAddress).catch(() => null);
+    [terms.links, terms.team] = await Promise.all([
+      input.keep?.links !== undefined ? input.keep.links : readProjectLinks(input.network, at, input.tokenAAddress, input.tokenBAddress).catch(() => null),
+      input.keep?.team !== undefined ? input.keep.team
+        : input.tokenAAddress ? readTeamLink(input.network, at, input.creatorAddress ?? null, input.tokenAAddress).catch(() => null) : null,
+    ]);
 
     const market = await readMarket(input.network, input.tokenAAddress, input.tokenBAddress, input.tokenACheck);
     if (market) {
@@ -300,10 +309,15 @@ export async function termsFor(
   tokenAAddress: Address | null,
   tokenBAddress: Address | null,
   tokenACheck?: LiquidityCheck,
+  options: { creator?: Address | null; keep?: MigrationTerms | null } = {},
 ): Promise<MigrationTerms | null> {
   try {
     const { selectors, signatures } = await inspectContract(network, contractAddress);
-    return await readMigrationTerms({ network, contractAddress, tokenAAddress, tokenBAddress, selectors, signatures, tokenACheck });
+    return await readMigrationTerms({
+      network, contractAddress, tokenAAddress, tokenBAddress, selectors, signatures, tokenACheck,
+      creatorAddress: options.creator ?? null,
+      keep: options.keep ?? null,
+    });
   } catch (err) {
     logger.warn({ err, network, contractAddress }, "Migration terms unavailable");
     return null;

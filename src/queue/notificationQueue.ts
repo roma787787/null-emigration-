@@ -131,7 +131,7 @@ async function handleRecheck(data: RecheckJobData, onAnalyzed: (result: Analyzed
     let updated = await migrationContractRepository.updateAnalysis(previous.id, analysis);
     if (updated && outcome === "notify") {
       // Token B is known now: so are the funding and its price.
-      const terms = await termsFor(data.network, data.contractAddress, tokenA, updated.tokenBAddress, previous.liquidity?.LOW_CAP);
+      const terms = await termsFor(data.network, data.contractAddress, tokenA, updated.tokenBAddress, previous.liquidity?.LOW_CAP, { creator: previous.creatorAddress });
       if (terms) {
         await migrationContractRepository.setTerms(updated.id, terms);
         updated = { ...updated, terms };
@@ -202,7 +202,7 @@ export function startContractCreationWorker(onAnalyzed: (result: AnalyzedMigrati
         matchedGetter: analysis.matchedGetter,
         txHash: data.txHash,
         blockNumber: BigInt(data.blockNumber),
-        terms: await termsFor(data.network, data.contractAddress, token.address, analysis.tokenBAddress),
+        terms: await termsFor(data.network, data.contractAddress, token.address, analysis.tokenBAddress, undefined, { creator: data.creatorAddress }),
       });
 
       if (!migrationContract) {
@@ -477,7 +477,7 @@ export function startAutoDiscoveryWorker(
         creatorAddress: data.creatorAddress,
         txHash: data.txHash,
         blockNumber: BigInt(data.blockNumber),
-        terms: await termsFor(data.network, data.contractAddress, result.tokenAAddress, result.tokenBAddress, liquidity?.LOW_CAP),
+        terms: await termsFor(data.network, data.contractAddress, result.tokenAAddress, result.tokenBAddress, liquidity?.LOW_CAP, { creator: data.creatorAddress }),
       });
       if (!migrationContract) return;
 

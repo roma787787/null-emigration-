@@ -4,6 +4,7 @@ import { runMigrations } from "./db/migrate.js";
 import { startBlockListener, type UntrackedCreationHandler } from "./chain/blockListener.js";
 import { startCustodianWatcher } from "./chain/custodianWatcher.js";
 import { openWatchOptionsFromEnv, startMigrationOpenWatcher } from "./chain/migrationOpenWatcher.js";
+import { profitWatchOptionsFromEnv, startProfitWatcher } from "./chain/profitWatcher.js";
 import {
   enqueueAutoCandidate,
   enqueueContractCreation,
@@ -16,7 +17,7 @@ import { autoDiscoveryMode } from "./config/autoMode.js";
 import { planWatch } from "./config/watchPlan.js";
 import { startOwnerRefresh } from "./queue/ownerRefreshQueue.js";
 import { okxHealthSnapshot } from "./liquidity/okxLiquidity.js";
-import { createBot, broadcastListings, broadcastMigrationAlert, broadcastMigrationOpened, notifyNewOwners } from "./telegram/bot.js";
+import { createBot, broadcastListings, broadcastMigrationAlert, broadcastMigrationOpened, broadcastProfitable, notifyNewOwners } from "./telegram/bot.js";
 import { ListingBatcher } from "./rwa/listings.js";
 import { launchWithConflictRetry } from "./telegram/launch.js";
 import { logger } from "./utils/logger.js";
@@ -121,6 +122,18 @@ async function main() {
         stopListeners.push(startMigrationOpenWatcher(network, (record) => broadcastMigrationOpened(bot, record), options));
       } catch (err) {
         logger.error({ err, network }, "Failed to start migration-opened watch for network");
+      }
+    }
+  }
+
+  // "The trade turned profitable": alerted migrations re-priced on OKX every hour.
+  if (process.env.PROFIT_WATCH !== "off") {
+    const options = profitWatchOptionsFromEnv();
+    for (const network of new Set([...enabledNetworks(), ...custodianNetworks])) {
+      try {
+        stopListeners.push(startProfitWatcher(network, (record) => broadcastProfitable(bot, record), options));
+      } catch (err) {
+        logger.error({ err, network }, "Failed to start profit watch for network");
       }
     }
   }

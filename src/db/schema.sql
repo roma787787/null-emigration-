@@ -92,6 +92,9 @@ ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS terms JSONB;
 ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS opened_at TIMESTAMPTZ;
 ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS opened_tx TEXT;
 ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS open_cursor BIGINT;
+-- "The trade turned profitable": the result last alerted (null = not alerted, or reset after it fell back below 0).
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS profit_alert_percent DOUBLE PRECISION;
+ALTER TABLE migration_contracts ADD COLUMN IF NOT EXISTS profit_alerted_at TIMESTAMPTZ;
 
 -- Per chat: liquidity test level for auto-discovered alerts, and whether to get them at all.
 ALTER TABLE chat_settings ADD COLUMN IF NOT EXISTS liquidity_level TEXT NOT NULL DEFAULT 'STRICT';

@@ -62,6 +62,12 @@ export interface MigrationTerms {
    * old price ÷ new price, an estimate only.
    */
   rate?: { newPerOld: number; source: "simulated" | "ratio" | "assumed" | "market"; checked?: boolean } | null;
+  /**
+   * Whether the contract is the old token's team's: its deployer is the old
+   * token's deployer, or its deployer/owner is the old token's deployer/owner.
+   * "no" = no tie found (a fake, or a team using a new wallet).
+   */
+  team?: { verdict: "yes" | "no" | "unknown"; via?: "deployer" | "owner" } | null;
   /** Where to migrate from a wallet: the contract's Write Contract tab (verified source), the project's site. */
   links?: { migrate: string | null; website: string | null } | null;
   /** New tokens already on the contract to hand out, or minted on exchange (the contract is the new token). */
@@ -115,6 +121,8 @@ export interface MigrationContractRecord {
   /** When the first exchange through the contract was seen (the "migration opened" alert), and its transaction. */
   openedAt?: Date | null;
   openedTx?: `0x${string}` | null;
+  /** The trade result (%) last sent as a "turned profitable" alert; null = none since it was last at a loss. */
+  profitAlertPercent?: number | null;
 }
 
 export interface ChatSettingsRecord {

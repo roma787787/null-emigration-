@@ -156,7 +156,7 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
         }
         record = {
           ...record,
-          terms: await termsFor(network, contractAddress, record.tokenAAddress, record.tokenBAddress, verdict?.liquidity?.LOW_CAP),
+          terms: await termsFor(network, contractAddress, record.tokenAAddress, record.tokenBAddress, verdict?.liquidity?.LOW_CAP, { creator: record.creatorAddress }),
         };
         await ctx.reply(formatMigrationAlert(tokenA, record, lang, { manual: true }), {
           parse_mode: "MarkdownV2",

@@ -679,7 +679,8 @@ console.log("\n=== migration terms & opening ===");
   const newH = await token("Redenominated New", "REDN");
   markets.set(lower(oldH), { low: 0.3, strict: 0.6, price: 1 });
   markets.set(lower(newH), { low: 1, strict: 2, price: 0.00105 });
-  const hidden = await deploy(stranger, "HiddenRateMigrator", [oldH, newH]);
+  // Deployed by the wallet that deployed (and owns) its tokens: the team's own.
+  const hidden = await deploy(owner, "HiddenRateMigrator", [oldH, newH]);
 
   const quickTerms = await termsFor(NETWORK, quickOpen, oldQ, newQ);
   const quickTrip = quickTerms?.prices?.roundTrip;
@@ -723,7 +724,48 @@ console.log("\n=== migration terms & opening ===");
       Math.abs((zapTrip?.outUsd ?? 0) - 295.88) < 0.05 && /1:0\\\.64 — checked by a trial exchange/.test(termsLines("en", zapTerms).join("\n")),
     zapTerms,
   );
+  check(
+    "team: a migrator deployed by the old token's deployer is the team's; one by an unrelated wallet is flagged",
+    hiddenTerms?.team?.verdict === "yes" && hiddenTerms.team.via === "deployer" && quickTerms?.team?.verdict === "no" &&
+      /👥 Команда старого токена: ✅ да — создан тем же адресом/.test(termsLines("ru", hiddenTerms).join("\n")) &&
+      /👥 Команда старого токена: ⚠️ связи с создателем или владельцем старого токена нет/.test(quickCard),
+    { hidden: hiddenTerms?.team, quick: quickTerms?.team },
+  );
   console.log("\n=== SAMPLE QUICK-STYLE TERMS (ru) ===\n" + quickCard);
+
+  // "The trade turned profitable": the pending migrator's new token (−7.8% at alert time) gets a deep market.
+  const { pollProfits } = await import("../src/chain/profitWatcher.js");
+  const { clearLiquidityCache } = await import("../src/liquidity/okxLiquidity.js");
+  const { formatProfitAlert } = await import("../src/telegram/notificationFormatter.js");
+  const profits: Array<{ record: NonNullable<Record_>; percent: number }> = [];
+  const onProfit = async (record: NonNullable<Record_>, percent: number) => void profits.push({ record, percent });
+  const pendingProfits = () => profits.filter((p) => eq(p.record.contractAddress, pending));
+  markets.set(lower(newA), { low: 1, strict: 2, price: 0.003 });
+  clearLiquidityCache();
+  await pollProfits(NETWORK, onProfit, { thresholdPercent: 5, stepPercent: 10 });
+  const first = pendingProfits()[0];
+  check(
+    `profit: re-priced, the pending migration's trade is now +${first?.percent.toFixed(1)}% → one "turned profitable" alert`,
+    pendingProfits().length === 1 && Math.abs((first?.percent ?? 0) - 41.4) < 0.2,
+    profits.map((p) => [p.record.contractAddress, p.percent]),
+  );
+  await pollProfits(NETWORK, onProfit, { thresholdPercent: 5, stepPercent: 10 });
+  check("profit: the same level again is not news — no repeat", pendingProfits().length === 1, pendingProfits().length);
+  markets.set(lower(newA), { low: 1, strict: 2, price: 0.0034 });
+  clearLiquidityCache();
+  await pollProfits(NETWORK, onProfit, { thresholdPercent: 5, stepPercent: 10 });
+  check(
+    `profit: 10 points higher (+${pendingProfits()[1]?.percent.toFixed(1)}%) is alerted again`,
+    pendingProfits().length === 2 && (pendingProfits()[1]?.percent ?? 0) > 55,
+    pendingProfits().map((p) => p.percent),
+  );
+  const profitCard = first ? formatProfitAlert(first.record, "ru") : "";
+  check(
+    "profit: the card leads with the trade and is valid MarkdownV2",
+    /СДЕЛКА СТАЛА ВЫГОДНОЙ/.test(profitCard) && /🔄 Сделка на \$300\\\.00: .*\\\+41\\\.\d%/.test(profitCard) && !markdownV2Problem(profitCard),
+    profitCard,
+  );
+  if (first) console.log("\n=== SAMPLE 'TRADE TURNED PROFITABLE' CARD (ru) ===\n" + profitCard);
 }
 
 // --- load: one block with 150 new contracts, one of them a migration ---------------------------

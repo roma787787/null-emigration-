@@ -296,7 +296,22 @@ find migrations. For every block on every enabled network:
    The card shows it as `🔁 Rate (old:new): 1:750 — checked by a trial
    exchange on the contract`, and the spread and the trade use it
    (`migrate 1:750 → sell new`).
-7. **"Migration opened"** — a second card on the first exchange through an
+   **Is it the old token's team's?** A `👥` line compares the migration
+   contract's deployer and `owner()` with the old token's deployer and
+   `owner()` (explorer API, else the deploy found on-chain): ✅ when they
+   tie, ⚠️ when they don't — an unrelated wallet behind a "v2" swap is what a
+   fake looks like (a team deploying from a new wallet looks the same, so the
+   card says to check the announcement). Left out when it can't be checked.
+
+7. **"The trade turned profitable"** — every alerted migration of the last
+   `PROFIT_WATCH_DAYS` (default 30) is re-priced every
+   `PROFIT_WATCH_INTERVAL_MS` (default 1 h): $300 of the old token, migrated
+   at the contract's rate, sold on OKX. A `💰` card goes out when the result
+   reaches `PROFIT_ALERT_PERCENT` (default +5%); again only
+   `PROFIT_ALERT_STEP` points higher (default 10), or after the trade fell
+   back to a loss. Gas is not included. `PROFIT_WATCH=off` turns it off.
+
+8. **"Migration opened"** — a second card on the first exchange through an
    alerted contract: the old token sent into it, the new token sent out of it
    (or minted by it), or one of its migration events. Found from logs every
    `OPEN_WATCH_INTERVAL_MS` (default 60 s), so it needs no tracing; watched

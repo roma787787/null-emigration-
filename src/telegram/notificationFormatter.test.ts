@@ -135,3 +135,35 @@ test("a migrate line links the contract's Write Contract tab and the project sit
   assert.equal(migrateLine("en", { ...terms, links: { migrate: null, website: null } }), null);
   assert.equal(migrateLine("en", { ...terms, links: undefined }), null);
 });
+
+test("the team line and the profit card are valid MarkdownV2 in every language", async () => {
+  const { termsLines, formatProfitAlert } = await import("./notificationFormatter.js");
+  const { markdownV2Problem } = await import("./markdownV2.js");
+  const base = { status: "open" as const, startsAt: null, endsAt: null, ratio: null, funding: null, prices: null };
+  for (const lang of ["en", "uk", "ru"] as const) {
+    for (const team of [{ verdict: "yes" as const, via: "deployer" as const }, { verdict: "yes" as const, via: "owner" as const }, { verdict: "no" as const }]) {
+      const text = termsLines(lang, { ...base, team }).join("\n");
+      assert.match(text, /👥/);
+      assert.equal(markdownV2Problem(text), null, text);
+    }
+    assert.doesNotMatch(termsLines(lang, { ...base, team: { verdict: "unknown" } }).join("\n"), /👥/);
+    const card = formatProfitAlert(
+      migration({
+        detectedAt: new Date("2026-10-10T00:00:00Z"),
+        terms: {
+          ...base,
+          rate: { newPerOld: 1, source: "simulated" },
+          prices: { oldUsd: 0.0021, newUsd: 0.003, spreadPercent: 42.9, at: 0, roundTrip: { inUsd: 300, outUsd: 424.29, percent: 41.43 } },
+          links: { migrate: "https://etherscan.io/address/0xabc#writeContract", website: null },
+        },
+      }),
+      lang,
+      new Date("2026-10-13T00:00:00Z"),
+    );
+    assert.equal(markdownV2Problem(card), null, card);
+    assert.match(card, /💰/);
+    assert.match(card, /\$424\\\.29 \\\(\\\+41\\\.4%\\\)/);
+    assert.match(card, /🚀/);
+  }
+  assert.match(formatProfitAlert(migration({ detectedAt: new Date("2026-10-10T00:00:00Z") }), "ru", new Date("2026-10-13T00:00:00Z")), /через 3 дн\\\. после первого алерта/);
+});

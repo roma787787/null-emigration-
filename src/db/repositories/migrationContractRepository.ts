@@ -35,6 +35,7 @@ interface MigrationContractRow {
   terms: MigrationContractRecord["terms"];
   opened_at: Date | null;
   opened_tx: string | null;
+  profit_alert_percent: number | null;
   open_cursor: string | null;
 }
 
@@ -66,6 +67,7 @@ function toRecord(row: MigrationContractRow): MigrationContractRecord {
     terms: row.terms ?? null,
     openedAt: row.opened_at ?? null,
     openedTx: (row.opened_tx as `0x${string}` | null) ?? null,
+    profitAlertPercent: row.profit_alert_percent ?? null,
   };
 }
 
@@ -165,6 +167,36 @@ export const migrationContractRepository = {
       [id, txHash, block.toString(), terms ? JSON.stringify(terms) : null],
     );
     return (rowCount ?? 0) > 0;
+  },
+
+  /** Alerted contracts of the last `days` with both tokens and terms: what the profit watch re-prices. */
+  async listProfitWatch(network: NetworkKey, days: number): Promise<MigrationContractRecord[]> {
+    const { rows } = await pool.query<MigrationContractRow>(
+      `SELECT * FROM migration_contracts
+        WHERE network = $1 AND token_a_address IS NOT NULL AND token_b_address IS NOT NULL AND terms IS NOT NULL
+          AND detected_at > now() - make_interval(days => $2)
+        ORDER BY detected_at`,
+      [network, days],
+    );
+    return rows.map(toRecord);
+  },
+
+  /**
+   * Records a profit alert at `percent`; false when another worker already
+   * alerted at this level or above (`previous` is what this worker read).
+   */
+  async markProfitAlerted(id: number, percent: number, previous: number | null): Promise<boolean> {
+    const { rowCount } = await pool.query(
+      `UPDATE migration_contracts SET profit_alert_percent = $2, profit_alerted_at = now()
+        WHERE id = $1 AND profit_alert_percent IS NOT DISTINCT FROM $3`,
+      [id, percent, previous],
+    );
+    return (rowCount ?? 0) > 0;
+  },
+
+  /** The trade fell back to a loss: the next time it turns profitable is news again. */
+  async resetProfitAlert(id: number): Promise<void> {
+    await pool.query(`UPDATE migration_contracts SET profit_alert_percent = NULL WHERE id = $1`, [id]);
   },
 
   async alreadySeen(network: NetworkKey, contractAddress: `0x${string}`): Promise<boolean> {
