@@ -142,6 +142,12 @@ export async function isVaultShare(client: PublicClient, token: Address): Promis
 // LP, loans, vaults, locks, NFTs, accounts, funds moved between a protocol's
 // own contracts or addresses.
 const POSITION_MIGRATION = /^migrate(Stakes?|Staking|Positions?|Liquidity|Lp|Loans?|LoanParams|Vaults?|Pools?|Locks?|Deposits?|Rewards?|Farms?|Nfts?|Accounts?|Users?|Funds?)/i;
+// A protocol moving its own funds or code to a successor contract:
+// `migrateTo(address newModule)`, `migrateReserve()`, `migrateStrategy(address)`
+// — called by the protocol on its own contracts, not by holders exchanging a token.
+const CONTRACT_MOVE = /^migrate(Reserves?|Treasury|Module|Strategy|Implementation|Core|Successor|Contract)$/i;
+const MOVE_TO_ADDRESS = /^migrateTo(New)?$/i;
+
 // A zero-argument function counts only when it is the bare verb (migrate() /
 // convert() of the caller's whole balance); `convertStep()`, `migrationEnded()`
 // and the like are views.
@@ -162,6 +168,9 @@ export function isMigrationAction(signature: string): boolean {
   if (/^(migrated|converted|converter|convertible)/i.test(name)) return false;
   if (/^convertTo(Shares|Assets)$/i.test(name)) return false;
   if (POSITION_MIGRATION.test(name)) return false;
+  if (CONTRACT_MOVE.test(name)) return false;
+  // migrateTo(address): where the funds go, no amount — a successor contract, not a holder's exchange.
+  if (MOVE_TO_ADDRESS.test(name) && signature.slice(name.length) === "(address)") return false;
   return signature.endsWith("()") ? BARE_VERB.test(name) : true;
 }
 

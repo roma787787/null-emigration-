@@ -81,3 +81,16 @@ test("yield strategies (migrate(address newStrategy), want(), vault()) are told 
   assert.equal(isVaultStrategy([sel("migrate(uint256)"), sel("oldToken()"), sel("newToken()"), sel("vault()")]), false);
   assert.equal(isVaultStrategy([sel("migrate(uint256)"), sel("harvest()")]), false);
 });
+
+test("a protocol moving its own funds to a successor contract is not a holder migration", () => {
+  // BALANCE module (Ethereum): migrateTo(address) moves reserves to the next module.
+  assert.equal(isMigrationAction("migrateTo(address)"), false);
+  assert.equal(isMigrationAction("migrateToNew(address)"), false);
+  assert.equal(isMigrationAction("migrateReserve()"), false);
+  assert.equal(isMigrationAction("migrateStrategy(address)"), false);
+  assert.equal(isMigrationAction("migrateImplementation(address)"), false);
+  // …while a holder's exchange with a recipient or an amount still counts.
+  assert.equal(isMigrationAction("migrateTo(address,uint256)"), true);
+  assert.equal(isMigrationAction("migrateTokens(uint256)"), true);
+  assert.equal(isMigrationAction("migrateToken(uint256)"), true);
+});
