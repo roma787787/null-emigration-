@@ -244,14 +244,25 @@ export function exchangeFromLogs(
   const c = contract.toLowerCase();
   let spent = 0n;
   let received = 0n;
-  for (const log of logs) {
-    if (log.topics[0] !== TRANSFER_TOPIC || log.topics.length < 3 || log.data.length < 66) continue;
-    const from = topicAddress(log.topics[1]);
-    const to = topicAddress(log.topics[2]);
-    const value = BigInt(log.data.slice(0, 66));
-    const token = log.address.toLowerCase();
-    if (token === tokenA.toLowerCase() && (to === c || DEAD.includes(to)) && from !== c) spent += value;
-    if (token === tokenB.toLowerCase() && (from === c || DEAD.includes(from)) && to !== c && !DEAD.includes(to)) received += value;
+  const holders = new Set<string>();
+  const transfers = logs.flatMap((log) =>
+    log.topics[0] === TRANSFER_TOPIC && log.topics.length >= 3 && log.data.length >= 66
+      ? [{ token: log.address.toLowerCase(), from: topicAddress(log.topics[1]), to: topicAddress(log.topics[2]), value: BigInt(log.data.slice(0, 66)) }]
+      : [],
+  );
+  for (const t of transfers) {
+    if (t.token === tokenA.toLowerCase() && (t.to === c || DEAD.includes(t.to)) && t.from !== c) {
+      spent += t.value;
+      holders.add(t.from);
+    }
+  }
+  // New tokens out of the contract (or minted)…
+  for (const t of transfers) {
+    if (t.token === tokenB.toLowerCase() && (t.from === c || DEAD.includes(t.from)) && t.to !== c && !DEAD.includes(t.to)) received += t.value;
+  }
+  // …or, paid from a treasury the contract pulls from, to whoever handed the old ones in.
+  if (received === 0n) {
+    for (const t of transfers) if (t.token === tokenB.toLowerCase() && holders.has(t.to)) received += t.value;
   }
   return spent > 0n && received > 0n ? { received, spent } : null;
 }

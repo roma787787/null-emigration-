@@ -94,3 +94,13 @@ test("a protocol moving its own funds to a successor contract is not a holder mi
   assert.equal(isMigrationAction("migrateTokens(uint256)"), true);
   assert.equal(isMigrationAction("migrateToken(uint256)"), true);
 });
+
+test("detections alerted under older rules are left alone when all their functions are non-holder moves", async () => {
+  const { stillAMigration } = await import("./tokenSignals.js");
+  assert.equal(stillAMigration(["migrateTo(address)"]), false);
+  assert.equal(stillAMigration(["migrateStake(address,uint256)", "migrateReserve()"]), false);
+  assert.equal(stillAMigration(["migrateTo(address)", "migrate(uint256)"]), true);
+  assert.equal(stillAMigration(["quickToQuickX(uint256)"]), true);
+  assert.equal(stillAMigration(["swap(uint256)"]), true);
+  assert.equal(stillAMigration([]), true);
+});

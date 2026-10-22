@@ -2,6 +2,7 @@ import type { MigrationContractRecord, NetworkKey } from "../types/index.js";
 import { migrationContractRepository } from "../db/repositories/migrationContractRepository.js";
 import { termsFor } from "../analyzer/migrationTerms.js";
 import { logger } from "../utils/logger.js";
+import { stillAMigration } from "../analyzer/tokenSignals.js";
 
 /**
  * "The trade turned profitable": every alerted migration of the last
@@ -57,7 +58,7 @@ export async function pollProfits(
   const days = options.days ?? 30;
   const threshold = options.thresholdPercent ?? 5;
   const step = options.stepPercent ?? 10;
-  const watched = await migrationContractRepository.listProfitWatch(network, days);
+  const watched = (await migrationContractRepository.listProfitWatch(network, days)).filter((r) => stillAMigration(r.matchedFunctions));
   for (const record of watched) {
     try {
       const terms = await termsFor(network, record.contractAddress, record.tokenAAddress, record.tokenBAddress, undefined, {

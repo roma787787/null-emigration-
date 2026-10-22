@@ -174,6 +174,21 @@ export function isMigrationAction(signature: string): boolean {
   return signature.endsWith("()") ? BARE_VERB.test(name) : true;
 }
 
+/**
+ * A matched function the current rules no longer take for a holder's
+ * exchange — a position or contract move, a view (migrateTo(address),
+ * migrateStake…). A detection whose functions are all such was alerted under
+ * older rules; the watches that follow it up (opened, profit) leave it be.
+ */
+export function isNonHolderMove(signature: string): boolean {
+  const name = signature.split("(")[0] ?? "";
+  return /^(migrate|convert)/i.test(name) && !isMigrationAction(signature);
+}
+
+export function stillAMigration(matchedFunctions: string[]): boolean {
+  return matchedFunctions.length === 0 || !matchedFunctions.every(isNonHolderMove);
+}
+
 // Upgradeable-proxy entry points: a proxy that has them but no implementation
 // yet is only half deployed; what it will become is decided by a later call.
 const PROXY_SELECTORS = ["upgradeTo(address)", "upgradeToAndCall(address,bytes)", "implementation()"].map((sig) =>

@@ -3,6 +3,8 @@ import type { MigrationContractRecord, NetworkKey } from "../types/index.js";
 import { getPublicClient } from "./provider.js";
 import { migrationContractRepository } from "../db/repositories/migrationContractRepository.js";
 import { termsFor } from "../analyzer/migrationTerms.js";
+import { observedExchange } from "../analyzer/migrationRate.js";
+import { stillAMigration } from "../analyzer/tokenSignals.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -101,6 +103,8 @@ export async function pollOpenings(
   const head = await client.getBlockNumber({ cacheTime: 0 });
 
   for (const record of watched) {
+    // Alerted under older rules, not a holder migration under today's (migrateTo(address)…): leave it.
+    if (!stillAMigration(record.matchedFunctions)) continue;
     let chunk = chunks.get(record.id) ?? BigInt(options.chunk ?? 2_000);
     // First pass: from the deploy — or, if the bot was down that long, a recent
     // window only: an exchange from weeks ago is not news.
@@ -116,6 +120,16 @@ export async function pollOpenings(
         if (chunk > 100n) chunks.set(record.id, (chunk /= 4n));
         logger.warn({ err, network, contract: record.contractAddress, from: from.toString(), to: to.toString() }, "Open watch: getLogs failed");
         break;
+      }
+      // With both tokens known, only a real exchange counts: old tokens in, new
+      // ones out. A deposit or a reserve move through the contract is not one.
+      if (found && record.tokenAAddress && record.tokenBAddress) {
+        const exchange = await observedExchange(client, found.txHash, record.contractAddress, record.tokenAAddress, record.tokenBAddress);
+        if (!exchange) {
+          await migrationContractRepository.setOpenCursor(record.id, found.blockNumber);
+          from = found.blockNumber + 1n;
+          continue;
+        }
       }
       if (found) {
         const terms = await termsFor(network, record.contractAddress, record.tokenAAddress, record.tokenBAddress, undefined, { creator: record.creatorAddress, keep: record.terms, observedTx: found.txHash });

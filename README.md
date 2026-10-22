@@ -318,7 +318,12 @@ find migrations. For every block on every enabled network:
 
 8. **"Migration opened"** — a second card on the first exchange through an
    alerted contract: the old token sent into it, the new token sent out of it
-   (or minted by it), or one of its migration events. Found from logs every
+   (or minted by it), or one of its migration events — and, when both
+   tokens are known, only a real exchange counts: old tokens in and new ones
+   out in the same transaction (a deposit or a reserve move through the
+   contract is skipped). Detections alerted under older rules whose
+   functions today's filters reject (`migrateTo(address)`…) are no longer
+   followed up, by this watch or the profit watch. Found from logs every
    `OPEN_WATCH_INTERVAL_MS` (default 60 s), so it needs no tracing; watched
    for `OPEN_WATCH_DAYS` (default 30) after the alert, only for alerts since
    this watch exists. The card links the first transaction, says how long

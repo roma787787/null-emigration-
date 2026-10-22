@@ -635,13 +635,17 @@ console.log("\n=== migration terms & opening ===");
   await chain.waitForTransactionReceipt({
     hash: await owner.writeContract({ address: oldB, abi: tokenAbi, functionName: "approve", args: [open, 10n ** 21n] } as never),
   });
+  // Old tokens merely sent to the not-yet-open migrator (a deposit, a reserve move): no new tokens came out — not an exchange.
+  await chain.waitForTransactionReceipt({
+    hash: await owner.writeContract({ address: oldA, abi: tokenAbi, functionName: "transfer", args: [pending, 10n ** 18n] } as never),
+  });
   const migrateTx = await owner.writeContract({ address: open, abi: migratorAbi, functionName: "migrate", args: [10n ** 21n] } as never);
   await chain.waitForTransactionReceipt({ hash: migrateTx });
   const opened: NonNullable<Record_>[] = [];
   await pollOpenings(NETWORK, async (record) => void opened.push(record), { chunk: 500, maxChunks: 100 });
   const openedOpen = opened.find((r) => eq(r.contractAddress, open));
   check(
-    "migration opened: the first exchange through the contract is found, with its transaction",
+    "migration opened: the first exchange through the contract is found, with its transaction; old tokens merely sent to another contract are not an exchange",
     !!openedOpen && eq(openedOpen.openedTx, migrateTx) && !opened.some((r) => eq(r.contractAddress, pending)),
     opened.map((r) => ({ contract: r.contractAddress, tx: r.openedTx })),
   );
@@ -660,6 +664,11 @@ console.log("\n=== migration terms & opening ===");
     openedCard,
   );
   if (openedOpen) console.log("\n=== SAMPLE 'MIGRATION OPENED' CARD (ru) ===\n" + openedCard);
+  check(
+    "migration opened: the card carries the rate read from that real exchange",
+    openedOpen?.terms?.rate?.newPerOld === 1 && ["simulated", "observed"].includes(openedOpen.terms.rate.source),
+    openedOpen?.terms?.rate,
+  );
   check(
     "rate: a migrator that opens tomorrow is simulated at its start time — 1:1",
     pendingTerms?.rate?.newPerOld === 1 && pendingTerms.rate.source === "simulated",

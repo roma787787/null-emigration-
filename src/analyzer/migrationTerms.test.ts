@@ -208,4 +208,11 @@ test("a real exchange's rate is read from its Transfer logs: old in (or burned),
   ];
   assert.deepEqual(exchangeFromLogs(logs, contract, oldT, newT), { received: 1000n * 10n ** 18n, spent: 10n ** 18n });
   assert.equal(exchangeFromLogs(logs.slice(0, 1), contract, oldT, newT), null);
+  // New tokens paid from a treasury to whoever handed the old ones in.
+  const treasury = "0x00000000000000000000000000000000000000dd";
+  const fromTreasury = [logs[0]!, { address: newT, topics: [T, pad(treasury), pad(user)], data: word(750n) }];
+  assert.deepEqual(exchangeFromLogs(fromTreasury, contract, oldT, newT), { received: 750n, spent: 10n ** 18n });
+  // Old tokens in, nothing out (a deposit): not an exchange.
+  const deposit = [logs[0]!, { address: newT, topics: [T, pad(treasury), pad("0x00000000000000000000000000000000000000ab")], data: word(5n) }];
+  assert.equal(exchangeFromLogs(deposit, contract, oldT, newT), null);
 });
