@@ -605,3 +605,18 @@ contract EoaOnlyMigrator {
         emit Migrated(msg.sender, amount);
     }
 }
+
+/// A router / trading bot (GNUS on Ethereum): executes encoded routes through
+/// swap(bytes) and moves its own funds with a bare migrate(); its tokens only
+/// in the constructor. Not a holder migration.
+contract RouterWithMigrate {
+    address private tokenA;
+    address private tokenB;
+    address private owner;
+    constructor(address a, address b) { tokenA = a; tokenB = b; owner = msg.sender; }
+    function swap(bytes calldata) external {}
+    function migrate() external {
+        require(msg.sender == owner, "owner");
+        SimpleToken(tokenA).transfer(owner, SimpleToken(tokenA).balanceOf(address(this)));
+    }
+}

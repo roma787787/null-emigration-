@@ -47,7 +47,7 @@ const KNOWN = [
   "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
   "quickToQuickX(uint256)", "SWAP_RATIO()", "quick()", "quickX()", "closedForTest()",
   "convertir(uint256,address,bytes)", "convertirSousPlancher(uint256,address,bytes,uint256)", "phar()", "p33()",
-  "want()", "vault()", "strategist()", "isActive()", "estimatedTotalAssets()", "harvest()",
+  "want()", "vault()", "strategist()", "isActive()", "estimatedTotalAssets()", "harvest()", "swap(bytes)",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {
@@ -434,6 +434,11 @@ cases.push({
 cases.push({
   label: "Yearn-style yield strategy over a traded token: migrate(address newStrategy), want(), vault() (CVX strategy shape) → ignored",
   address: await deployTimed(stranger, "YearnStyleStrategy", [realLend, newToken2]),
+  expect: expectNone,
+});
+cases.push({
+  label: "router / trading bot: swap(bytes) route executor + a bare migrate() moving its own funds (GNUS shape) → ignored",
+  address: await deployTimed(stranger, "RouterWithMigrate", [realLend, newToken2]),
   expect: expectNone,
 });
 cases.push({ label: "meme token with setMigratedPool / migratedPools (four.meme shape) → ignored", address: await deployTimed(stranger, "MemePoolToken", [realLend]), expect: expectNone });
