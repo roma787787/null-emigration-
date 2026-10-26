@@ -440,8 +440,8 @@ creations.set(byStranger.address.toLowerCase(), { creator: strangerWallet.accoun
 verifiedContracts.add(byStranger.address.toLowerCase());
 r = await send(ALICE, `/analyze anvil ${byStranger.address}`);
 check(
-  "/analyze lists every function of the contract, named where the signature database knows it",
-  textsTo(r, ALICE).some((m) => m.startsWith("🧩 Функції контракту (") && m.includes("migrate(uint256)") && m.includes("newToken()")),
+  "/analyze lists every function of the contract (selectors here: this suite has no signature database)",
+  textsTo(r, ALICE).some((m) => m.startsWith("🧩 Функції контракту (4)") && m.includes("0x454b0608")),
   textsTo(r, ALICE),
 );
 check(
