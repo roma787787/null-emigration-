@@ -615,6 +615,8 @@ contract RouterWithMigrate {
     address private owner;
     constructor(address a, address b) { tokenA = a; tokenB = b; owner = msg.sender; }
     function swap(bytes calldata) external {}
+    // Bots carry "xToY" helpers too — not tied to any token getter of theirs.
+    function ethToToken(uint256) external payable {}
     function migrate() external {
         require(msg.sender == owner, "owner");
         SimpleToken(tokenA).transfer(owner, SimpleToken(tokenA).balanceOf(address(this)));

@@ -136,13 +136,6 @@ export async function analyzeAutoCandidate(
   if (isToken && !oldGetter && nameSignals.length > 0 && nameSignals.every((s) => /^convert/i.test(nameOf(s)) && !OLD_NAME.test(nameOf(s)))) {
     return { kind: "skipped", reason: "token with a bare convert() (wrapper or mint)" };
   }
-  // A swap that takes nothing but encoded route data (`swap(bytes)`) is a
-  // router's or trading bot's executor; next to it a bare `migrate()` moves the
-  // bot's own funds to its next version — not holders exchanging a token.
-  const opaqueSwaps = swapNames.filter((s) => /^\w+\((bytes(\[\])?)(,bytes(\[\])?)*\)$/.test(s));
-  if (opaqueSwaps.length > 0 && !oldGetter && converterNames.length === 0 && nameSignals.every((s) => s.endsWith("()"))) {
-    return { kind: "skipped", reason: "router / trading bot (swap(bytes) executor)" };
-  }
   const swapOnly = nameSignals.length === 0 && !oldGetter && converterNames.length === 0;
   if (swapOnly && amountOnlySwaps.length === 0) {
     return { kind: "skipped", reason: swapNames.length > 0 ? "swap functions only" : "no migration signature" };
@@ -181,6 +174,15 @@ export async function analyzeAutoCandidate(
   });
   if (nameSignals.length === 0 && !oldGetter && verifiedConverters.length === 0 && amountOnlySwaps.length === 0) {
     return { kind: "skipped", reason: "converter names don't match its tokens" };
+  }
+  // A swap that takes nothing but encoded route data (`swap(bytes)`) is a
+  // router's or trading bot's executor; next to it a bare `migrate()` moves the
+  // bot's own funds to its next version — not holders exchanging a token.
+  // (Bots also carry "ethToToken"-style helpers: only converters verified
+  // against the contract's own token getters count against this.)
+  const opaqueSwaps = swapNames.filter((s) => /^\w+\((bytes(\[\])?)(,bytes(\[\])?)*\)$/.test(s));
+  if (opaqueSwaps.length > 0 && !oldGetter && verifiedConverters.length === 0 && nameSignals.every((s) => s.endsWith("()"))) {
+    return { kind: "skipped", reason: "router / trading bot (swap(bytes) executor)" };
   }
   const migrationFunctions = [...nameSignals, ...verifiedConverters, ...swapNames];
   const functionNames = migrationFunctions.map(nameOf);

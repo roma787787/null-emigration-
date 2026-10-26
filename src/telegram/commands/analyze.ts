@@ -15,6 +15,7 @@ import { analyzeAutoCandidate } from "../../analyzer/autoAnalyzer.js";
 import { applyLiquidityRules, type LiquidityDecision } from "../../queue/notificationQueue.js";
 import { findDeployTx } from "../../chain/creationLookup.js";
 import { termsFor } from "../../analyzer/migrationTerms.js";
+import { inspectContract } from "../../analyzer/migrationAnalyzer.js";
 
 function isTxHash(value: string): value is Hex {
   return isHex(value) && value.length === 66;
@@ -174,6 +175,14 @@ export function registerAnalyzeCommand(bot: Telegraf): void {
                   ? t(lang, "analyze.autoSkipped", { reason: verdict.reason, block })
                   : t(lang, "analyze.autoCandidate", { block }),
         );
+        // Every function the contract has (names where the signature database
+        // knows them): what the filters decided on, for when a verdict surprises.
+        const inspection = await inspectContract(network, contractAddress).catch(() => null);
+        if (inspection && inspection.selectors.length > 0) {
+          const names = inspection.selectors.map((sel) => inspection.signatures.get(sel) ?? sel).sort();
+          const shown = names.slice(0, 60).join(", ") + (names.length > 60 ? ", …" : "");
+          await ctx.reply(t(lang, "analyze.functions", { count: String(names.length), list: shown }));
+        }
       }
     } catch (err) {
       logger.error({ err, network, hash }, "/analyze failed");

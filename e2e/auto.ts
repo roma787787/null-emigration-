@@ -47,7 +47,7 @@ const KNOWN = [
   "newStaking()", "fromToken()", "toToken()", "convert(address,address,uint256)",
   "quickToQuickX(uint256)", "SWAP_RATIO()", "quick()", "quickX()", "closedForTest()",
   "convertir(uint256,address,bytes)", "convertirSousPlancher(uint256,address,bytes,uint256)", "phar()", "p33()",
-  "want()", "vault()", "strategist()", "isActive()", "estimatedTotalAssets()", "harvest()", "swap(bytes)",
+  "want()", "vault()", "strategist()", "isActive()", "estimatedTotalAssets()", "harvest()", "swap(bytes)", "ethToToken(uint256)",
 ];
 const bySelector = new Map(KNOWN.map((s) => [toFunctionSelector(s), s]));
 const sigDb = createServer((req, res) => {

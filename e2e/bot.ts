@@ -440,6 +440,11 @@ creations.set(byStranger.address.toLowerCase(), { creator: strangerWallet.accoun
 verifiedContracts.add(byStranger.address.toLowerCase());
 r = await send(ALICE, `/analyze anvil ${byStranger.address}`);
 check(
+  "/analyze lists every function of the contract, named where the signature database knows it",
+  textsTo(r, ALICE).some((m) => m.startsWith("🧩 Функції контракту (") && m.includes("migrate(uint256)") && m.includes("newToken()")),
+  textsTo(r, ALICE),
+);
+check(
   "/analyze links where to migrate: the verified contract's Write Contract tab and the project site from DexScreener",
   textsTo(r, ALICE).some((m) => m.includes(`🚀 Мігрувати: [через контракт \\(Write Contract\\)](`) && m.includes(`${byStranger.address}#writeContract)`) &&
     m.includes("[сайт проєкту](https://old-token.example/migrate)")),
